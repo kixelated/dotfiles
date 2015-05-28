@@ -17,12 +17,14 @@ set directory=~/.vim/temp
 set number              " line numbers
 set noerrorbells
 
-set autoindent          " auto indenting
 set backspace=indent,eol,start
+
+set noexpandtab
+set tabstop=4
 set shiftwidth=4
 set softtabstop=4
-set tabstop=4
-"set expandtab
+
+"set autoindent          " auto indenting
 "set cindent
 
 set incsearch
