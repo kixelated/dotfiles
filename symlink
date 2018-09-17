@@ -1,5 +1,7 @@
 #!/bin/bash
+set -e
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-rm ~/.vim && ln -s "$DIR/vim" ~/.vim
-rm ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
+rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
+rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
+rm -f ~/.bash_aliases && ln -s "$DIR/bash_aliases" ~/.bash_aliases
