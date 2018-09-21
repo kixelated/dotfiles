@@ -2,6 +2,7 @@
 set -e
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+rm -rf ~/.config/nvim && ln -s "$DIR/config/nvim" ~/.config/nvim
 rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
 rm -f ~/.bash_aliases && ln -s "$DIR/bash_aliases" ~/.bash_aliases
