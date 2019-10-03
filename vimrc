@@ -62,3 +62,7 @@ if has("autocmd")
 endif
 
 autocmd BufRead,BufNewFile *.as set filetype=as3
+
+" Disable the bell sound on errors
+set noerrorbells visualbell t_vb=
+autocmd GUIEnter * set visualbell t_vb=
