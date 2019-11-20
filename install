@@ -8,4 +8,4 @@ rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
 rm -f ~/.bash_aliases && ln -s "$DIR/bash_aliases" ~/.bash_aliases
 
-git submodule update --remote
+git submodule update --init --remote

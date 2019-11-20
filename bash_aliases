@@ -5,4 +5,5 @@ export AWS_DEFAULT_REGION="us-west-2"
 
 export GOPRIVATE="*.justin.tv"
 export PATH="$PATH:~/go/bin"
-export PATH="$PATH:/usr/local/go/bin"
+export PATH="$PATH:~/twitch/go/bin"
+export GIT_EDITOR="vim"
