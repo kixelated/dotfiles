@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clean"
+  short_description: "Safely clean worktrees, builds, caches, and Nix"
+  default_prompt: "Use $clean to audit disk usage and safely reclaim stale worktrees, build output, caches, container storage, and unreachable Nix paths."

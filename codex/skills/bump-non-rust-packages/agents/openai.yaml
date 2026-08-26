@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bump Non-Rust Packages"
+  short_description: "Audit and bump MoQ non-Rust package versions"
+  default_prompt: "Use $bump-non-rust-packages to audit unreleased non-Rust changes and apply the required package version bumps."
