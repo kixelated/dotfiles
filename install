@@ -6,16 +6,21 @@ DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 mkdir -p ~/.config && rm -rf ~/.config/nvim && ln -s "$DIR/config/nvim" ~/.config/nvim
 rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
-rm -f ~/.zshrc && ln -s "$DIR/zshrc" ~/.zshrc
+# The machine's ~/.zshrc stays local; it just sources the tracked config.
+rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
+grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >> ~/.zshrc
+
 rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 
-mkdir -p ~/.claude ~/.codex
-rm -rf ~/.claude/skills ~/.codex/skills
+# ~/.agents/skills is Codex's user-level skills dir; ~/.codex/skills is
+# deprecated and Codex-managed (.system lives there), so leave it alone.
+mkdir -p ~/.claude ~/.codex ~/.agents
+rm -rf ~/.claude/skills ~/.agents/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
 ln -s "$DIR/.claude/skills" ~/.claude/skills
 ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
-ln -s "$DIR/.codex/skills" ~/.codex/skills
+ln -s "$DIR/.agents/skills" ~/.agents/skills
 
 git submodule update --init --remote
