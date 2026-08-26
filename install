@@ -3,8 +3,6 @@ set -euxo pipefail
 
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-mkdir -p ~/.config && rm -rf ~/.config/nvim && ln -s "$DIR/config/nvim" ~/.config/nvim
-rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
 # The machine's ~/.zshrc stays local; it just sources the tracked config.
 rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
