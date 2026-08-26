@@ -1,0 +1,4 @@
+# Kache handles caching; incremental artifacts can't be shared and just burn disk.
+[build]
+incremental = false
+jobs = 2

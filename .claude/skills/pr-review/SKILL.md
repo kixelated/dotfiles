@@ -11,14 +11,16 @@ Parse `$ARGUMENTS`: first token (if numeric) is the PR number; the rest is revie
 
 ## Locate the Codex runtime
 
-The plugin's slash commands can't be model-invoked, but they are thin wrappers over a companion script you can call directly:
+The runtime is vendored with these dotfiles; fall back to the Claude plugin cache if the submodule isn't checked out:
 
 ```bash
-COMPANION=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1)
+DOTFILES="$(realpath ~/.claude/skills/../..)"
+COMPANION="$DOTFILES/vendor/codex-plugin-cc/plugins/codex/scripts/codex-companion.mjs"
+[ -f "$COMPANION" ] || COMPANION=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1)
 node "$COMPANION" setup --json   # confirm "ready": true
 ```
 
-If the script is missing or setup reports not ready, tell the user (point them at `/plugin` install or `/codex:setup`) and offer to fall back to the `/code-review` skill instead. Don't silently substitute yourself for Codex — the whole point is the second opinion.
+If the script is missing or setup reports not ready, tell the user (run the dotfiles `install`, or `/plugin` install) and offer to fall back to the `/code-review` skill instead. Don't silently substitute yourself for Codex — the whole point is the second opinion.
 
 ## Steps
 

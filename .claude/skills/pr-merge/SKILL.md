@@ -10,9 +10,11 @@ Land a pull request through a pipeline: rebase onto the fresh base (Codex), adve
 Parse `$ARGUMENTS`: the first token (if numeric) is the PR number, and everything after it is extra instructions or review focus. If no PR number is given, resolve it from the current branch:
 `gh pr list --head "$(git branch --show-current)" --json number --jq '.[0].number'`.
 
-Locate the Codex runtime the same way `/pr-review` does:
+Locate the Codex runtime the same way `/pr-review` does (vendored with these dotfiles, plugin cache as fallback):
 ```bash
-COMPANION=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1)
+DOTFILES="$(realpath ~/.claude/skills/../..)"
+COMPANION="$DOTFILES/vendor/codex-plugin-cc/plugins/codex/scripts/codex-companion.mjs"
+[ -f "$COMPANION" ] || COMPANION=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1)
 node "$COMPANION" setup --json   # confirm "ready": true
 ```
 If Codex isn't available, say so and ask whether to proceed with a Claude-only review (`/code-review`) instead — don't quietly drop the second opinion.
