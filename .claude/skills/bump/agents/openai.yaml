@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bump"
+  short_description: "Audit and bump changed package versions"
+  default_prompt: "Use $bump to audit unreleased changes and apply the required package version bumps."

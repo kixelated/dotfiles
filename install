@@ -3,39 +3,22 @@ set -euxo pipefail
 
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-mkdir -p ~/.config && rm -rf ~/.config/nvim && ln -s "$DIR/config/nvim" ~/.config/nvim
-rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
-rm -f ~/.zshrc && ln -s "$DIR/zshrc" ~/.zshrc
+# The machine's ~/.zshrc stays local; it just sources the tracked config.
+rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
+grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >> ~/.zshrc
 
-mkdir -p ~/.agents ~/.claude/skills ~/.codex/skills
-rm -rf ~/.agents/skills
-ln -s "$DIR/agents/skills" ~/.agents/skills
+rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
+mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 
+# ~/.agents/skills is Codex's user-level skills dir; ~/.codex/skills is
+# deprecated and Codex-managed (.system lives there), so leave it alone.
+mkdir -p ~/.claude ~/.codex ~/.agents
+rm -rf ~/.claude/skills ~/.agents/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
-ln -s "$DIR/claude/CLAUDE.md" ~/.claude/CLAUDE.md
-ln -s ../.claude/CLAUDE.md ~/.codex/AGENTS.md
-
-for skill in grill-me grill-with-docs grilling; do
-	rm -rf "$HOME/.claude/skills/$skill"
-	ln -s "$HOME/.agents/skills/$skill" "$HOME/.claude/skills/$skill"
-done
-
-for skill in grill-me grilling; do
-	rm -rf "$HOME/.codex/skills/$skill"
-	ln -s "$HOME/.agents/skills/$skill" "$HOME/.codex/skills/$skill"
-done
-
-for skill in "$DIR"/claude/skills/*; do
-	name=$(basename "$skill")
-	rm -rf "$HOME/.claude/skills/$name"
-	ln -s "$skill" "$HOME/.claude/skills/$name"
-done
-
-for skill in "$DIR"/codex/skills/*; do
-	name=$(basename "$skill")
-	rm -rf "$HOME/.codex/skills/$name"
-	ln -s "$skill" "$HOME/.codex/skills/$name"
-done
+ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
+ln -s "$DIR/.claude/skills" ~/.claude/skills
+ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
+ln -s "$DIR/.agents/skills" ~/.agents/skills
 
 git submodule update --init --remote
