@@ -13,7 +13,7 @@ rm -rf ~/.claude/skills ~/.codex/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
 ln -s "$DIR/.claude/skills" ~/.claude/skills
-ln -s ../.claude/CLAUDE.md ~/.codex/AGENTS.md
-ln -s ../.claude/skills ~/.codex/skills
+ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
+ln -s "$DIR/.claude/skills" ~/.codex/skills
 
 git submodule update --init --remote

@@ -1,50 +1,31 @@
 ---
 name: bump
-description: Audit and apply semver version bumps for changed published packages. Skip Rust crates when the repository uses release-plz. Use when APIs or behavior changed, before a release, or when asked whether package versions are stale. Prefer patch bumps for fixes and additive APIs, and minor bumps for breaking APIs.
+description: Audit and apply semver version bumps for published packages with unreleased changes, skipping Rust crates when release-plz owns them. Use before a release or when asked whether package versions are stale. Convention here is patch for fixes and additive APIs, minor for breaking changes.
 ---
 
 # Bump Packages
 
-Audit changes package by package, update only independently versioned release sources, and keep generated or lockstep bindings aligned with their owning package.
+Audit package by package and bump only independently versioned release sources. First detect whether release-plz is configured (a tracked config file or release workflow, not a mere mention in docs or lockfiles); if so, Rust crate versions belong to it: leave them alone and say so in the report.
 
 ## Audit
 
-1. Read the repository `AGENTS.md` or `CLAUDE.md`, plus the guide for each affected language.
-2. Detect whether the repository uses release-plz by inspecting tracked configuration and release workflows. When release-plz is configured, skip Rust crate version changes and report that release-plz owns them. A dependency or documentation mention alone is not a configured release workflow.
-3. Identify the intended comparison:
-   - On a feature branch, inspect the merge-base diff against the target branch.
-   - On the target branch or a clean detached checkout, inspect changes since each package's latest version-bump commit.
-4. Map changed public files to published packages. Do not infer a bump from commit prefixes alone. Inspect exports, signatures, types, documented behavior, wire behavior, and user-visible fixes.
-5. Classify each changed package:
-   - No bump: docs, tests, internal refactors, dependency-only changes with no shipped effect, private packages, or generated bindings whose version is owned elsewhere.
-   - Patch: bug fixes, behavioral improvements, dependency fixes that affect consumers, and additive public APIs.
-   - Minor: removed or renamed APIs, changed signatures or semantics, newly invalid call patterns, and other breaking consumer changes.
-6. Treat pre-1.0 packages by the repository rule above. Do not turn an additive API into a minor bump merely because standard semver permits it.
-7. Check dependents only when their shipped contents or public contract changed. A dependency range that already accepts the new version does not require a release by itself.
+1. Read the repo's `CLAUDE.md`/`AGENTS.md` and per-language guides; they own the versioning conventions.
+2. Pick the comparison: on a feature branch, the merge-base diff against the target branch. On the target branch, changes since each package's last version-bump commit: `git log -- <version-file>` to find the bump, then `git log`/`git diff <bump>..HEAD -- <package-path>` for the unreleased work. Changes before that bump commit are already released.
+3. Classify each changed package from actual exports, signatures, and behavior, never from commit prefixes alone:
+   - **none**: docs, tests, internal refactors, private packages, generated bindings versioned elsewhere, dependency-only changes with no shipped effect.
+   - **patch**: bug fixes, behavioral improvements, additive public APIs (the pre-1.0 convention here; don't escalate additive to minor just because semver would allow it).
+   - **minor**: removed/renamed APIs, changed signatures or semantics, anything that breaks a consumer.
+4. Dependents need a release only when their shipped contents or public contract changed; a version range that already accepts the new version does not by itself.
 
-Use `git log -- <version-file>` to find the last bump, then `git log <bump-commit>..HEAD -- <package-path>` and `git diff <bump-commit>..HEAD -- <package-path>` to inspect unreleased work. Account for a bump commit that included other package changes: changes earlier than that commit are already released by that bump.
+## Version sources (moq repo)
 
-## Version Sources
+- Rust: release-plz owns crate versions and Rust dependency requirements; don't edit them.
+- JavaScript: `js/*/package.json` packages with a `scripts.release` entry (skip private ones like `@moq/clock`, `@moq/wasm`), plus the matching workspace version in `bun.lock`.
+- Python: `py/moq-rs/pyproject.toml` only; `py/moq-ffi` follows the `moq-ffi-v*` tag and Rust crate.
+- Swift: `swift/VERSION`. Kotlin: `moq.version` in `kt/gradle.properties`. Their FFI counterparts track the Rust crate; don't bump them independently.
+- Go: `go/wrapper/VERSION` holds a human-owned `MAJOR.MINOR` line; CI derives the patch, so only edit it for a breaking API. Leave the placeholder FFI version in `go.mod` alone.
+- When a documented install version changes, grep the repo for the old coordinate/version and update every install example for that package.
 
-- Rust: when release-plz is configured, do not edit crate versions or Rust dependency requirements. Otherwise bump the `package.version` of each changed published crate, update `Cargo.lock`, and update dependent version requirements only when the existing range excludes the new version. Do not bump unpublished crates or workspace-only packages.
-- JavaScript: bump published `js/*/package.json` packages that have a `scripts.release` entry. Skip private packages such as `@moq/clock` and `@moq/wasm`. Update the matching workspace version in `bun.lock`.
-- Python wrapper: bump `py/moq-rs/pyproject.toml`. Do not bump `py/moq-ffi`; its version comes from the `moq-ffi-v*` tag and Rust crate.
-- Swift wrapper: bump `swift/VERSION`. Update committed install examples or generated-template expectations that contain the wrapper version. Do not independently bump `MoqFFI`.
-- Kotlin wrapper: bump `moq.version` in `kt/gradle.properties`. Update committed install examples containing that version. Do not bump `moqffi.version`; CI supplies it from the Rust release.
-- Go wrapper: `go/wrapper/VERSION` contains only the human-owned `MAJOR.MINOR` line. Keep it unchanged for fixes and additive APIs because CI derives the next patch. Bump the line for a breaking API. Do not edit the placeholder FFI version in `go.mod`.
-- Raw FFI packages for Python, Swift, Kotlin, and Go track `rs/moq-ffi`; audit the Rust crate version rather than inventing independent non-Rust versions.
+## Apply and verify
 
-When changing a documented install version, search the repository for the old coordinate or version and update every canonical installation example for that same package.
-
-## Apply and Verify
-
-1. Use the repository's normal formatter or lockfile command when it changes only intended files. Otherwise make the smallest exact manifest and lockfile edits.
-2. Review `git diff --check` and the full version diff.
-3. Run focused checks for affected packages. For JavaScript manifest-only bumps, validate JSON and run the relevant package checks when practical.
-4. Report:
-   - each package and old to new version,
-   - the change that requires the bump,
-   - packages reviewed but intentionally unchanged and why, including Rust packages skipped because release-plz owns them,
-   - checks run.
-
-Do not publish, tag, commit, or push unless the user asks.
+Make the smallest exact manifest and lockfile edits (or run the repo's lockfile command when it changes only intended files). Then review `git diff --check` and the full diff, and run the affected packages' checks. Report each bump (old to new, and the change that requires it), packages examined but left unchanged and why (including release-plz skips), and the checks run. Never publish, tag, commit, or push unless the user asks.
