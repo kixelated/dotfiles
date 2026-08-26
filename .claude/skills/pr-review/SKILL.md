@@ -1,7 +1,6 @@
 ---
 name: pr-review
 description: Adversarial second-opinion review of a GitHub PR using Codex (a different model), then triage and fix the findings Claude agrees with. Use when the user wants a PR reviewed with a second opinion — e.g. "pr-review 123", "get codex's take on this PR", "adversarial review this branch and fix what's real". Runs the Codex plugin's adversarial review against the PR branch in a worktree, verifies each finding against the code, applies the agreed fixes, pushes, and files GitHub issues for real-but-out-of-scope problems. Never merges.
-argument-hint: "[pr-number] [optional review focus / instructions]"
 ---
 
 # Adversarial PR Review (Codex second opinion)

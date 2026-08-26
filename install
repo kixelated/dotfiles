@@ -8,34 +8,12 @@ rm -rf ~/.vim && ln -s "$DIR/vim" ~/.vim
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
 rm -f ~/.zshrc && ln -s "$DIR/zshrc" ~/.zshrc
 
-mkdir -p ~/.agents ~/.claude/skills ~/.codex/skills
-rm -rf ~/.agents/skills
-ln -s "$DIR/agents/skills" ~/.agents/skills
-
+mkdir -p ~/.claude ~/.codex
+rm -rf ~/.claude/skills ~/.codex/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
-ln -s "$DIR/claude/CLAUDE.md" ~/.claude/CLAUDE.md
+ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
+ln -s "$DIR/.claude/skills" ~/.claude/skills
 ln -s ../.claude/CLAUDE.md ~/.codex/AGENTS.md
-
-for skill in grill-me grill-with-docs grilling; do
-	rm -rf "$HOME/.claude/skills/$skill"
-	ln -s "$HOME/.agents/skills/$skill" "$HOME/.claude/skills/$skill"
-done
-
-for skill in grill-me grilling; do
-	rm -rf "$HOME/.codex/skills/$skill"
-	ln -s "$HOME/.agents/skills/$skill" "$HOME/.codex/skills/$skill"
-done
-
-for skill in "$DIR"/claude/skills/*; do
-	name=$(basename "$skill")
-	rm -rf "$HOME/.claude/skills/$name"
-	ln -s "$skill" "$HOME/.claude/skills/$name"
-done
-
-for skill in "$DIR"/codex/skills/*; do
-	name=$(basename "$skill")
-	rm -rf "$HOME/.codex/skills/$name"
-	ln -s "$skill" "$HOME/.codex/skills/$name"
-done
+ln -s ../.claude/skills ~/.codex/skills
 
 git submodule update --init --remote

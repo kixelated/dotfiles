@@ -1,30 +1,32 @@
 ---
-name: bump-non-rust-packages
-description: Audit and apply semver version bumps for MoQ packages outside the Rust workspace. Use when non-Rust APIs or behavior changed, before releasing JavaScript, Python, Swift, Kotlin, or Go packages, or when asked whether package versions are stale. Prefer patch bumps for fixes and additive APIs, and minor bumps for breaking APIs.
+name: bump
+description: Audit and apply semver version bumps for changed published packages. Skip Rust crates when the repository uses release-plz. Use when APIs or behavior changed, before a release, or when asked whether package versions are stale. Prefer patch bumps for fixes and additive APIs, and minor bumps for breaking APIs.
 ---
 
-# Bump Non-Rust Packages
+# Bump Packages
 
-Audit changes package by package, update only independently versioned release sources, and keep generated or lockstep bindings aligned with their owning Rust crate.
+Audit changes package by package, update only independently versioned release sources, and keep generated or lockstep bindings aligned with their owning package.
 
 ## Audit
 
 1. Read the repository `AGENTS.md` or `CLAUDE.md`, plus the guide for each affected language.
-2. Identify the intended comparison:
+2. Detect whether the repository uses release-plz by inspecting tracked configuration and release workflows. When release-plz is configured, skip Rust crate version changes and report that release-plz owns them. A dependency or documentation mention alone is not a configured release workflow.
+3. Identify the intended comparison:
    - On a feature branch, inspect the merge-base diff against the target branch.
    - On the target branch or a clean detached checkout, inspect changes since each package's latest version-bump commit.
-3. Map changed public files to published packages. Do not infer a bump from commit prefixes alone. Inspect exports, signatures, types, documented behavior, wire behavior, and user-visible fixes.
-4. Classify each changed package:
+4. Map changed public files to published packages. Do not infer a bump from commit prefixes alone. Inspect exports, signatures, types, documented behavior, wire behavior, and user-visible fixes.
+5. Classify each changed package:
    - No bump: docs, tests, internal refactors, dependency-only changes with no shipped effect, private packages, or generated bindings whose version is owned elsewhere.
    - Patch: bug fixes, behavioral improvements, dependency fixes that affect consumers, and additive public APIs.
    - Minor: removed or renamed APIs, changed signatures or semantics, newly invalid call patterns, and other breaking consumer changes.
-5. Treat pre-1.0 packages by the repository rule above. Do not turn an additive API into a minor bump merely because standard semver permits it.
-6. Check dependents only when their shipped contents or public contract changed. A dependency range that already accepts the new version does not require a release by itself.
+6. Treat pre-1.0 packages by the repository rule above. Do not turn an additive API into a minor bump merely because standard semver permits it.
+7. Check dependents only when their shipped contents or public contract changed. A dependency range that already accepts the new version does not require a release by itself.
 
 Use `git log -- <version-file>` to find the last bump, then `git log <bump-commit>..HEAD -- <package-path>` and `git diff <bump-commit>..HEAD -- <package-path>` to inspect unreleased work. Account for a bump commit that included other package changes: changes earlier than that commit are already released by that bump.
 
 ## Version Sources
 
+- Rust: when release-plz is configured, do not edit crate versions or Rust dependency requirements. Otherwise bump the `package.version` of each changed published crate, update `Cargo.lock`, and update dependent version requirements only when the existing range excludes the new version. Do not bump unpublished crates or workspace-only packages.
 - JavaScript: bump published `js/*/package.json` packages that have a `scripts.release` entry. Skip private packages such as `@moq/clock` and `@moq/wasm`. Update the matching workspace version in `bun.lock`.
 - Python wrapper: bump `py/moq-rs/pyproject.toml`. Do not bump `py/moq-ffi`; its version comes from the `moq-ffi-v*` tag and Rust crate.
 - Swift wrapper: bump `swift/VERSION`. Update committed install examples or generated-template expectations that contain the wrapper version. Do not independently bump `MoqFFI`.
@@ -42,7 +44,7 @@ When changing a documented install version, search the repository for the old co
 4. Report:
    - each package and old to new version,
    - the change that requires the bump,
-   - packages reviewed but intentionally unchanged and why,
+   - packages reviewed but intentionally unchanged and why, including Rust packages skipped because release-plz owns them,
    - checks run.
 
 Do not publish, tag, commit, or push unless the user asks.

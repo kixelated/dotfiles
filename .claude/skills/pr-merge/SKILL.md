@@ -1,7 +1,6 @@
 ---
 name: pr-merge
 description: Rebase, adversarially review (via Codex), and merge a GitHub PR once CI is green, backing out if anything questionable turns up. Use whenever the user wants to land, ship, finish, or merge a pull request — e.g. "review and merge PR 123", "land this once CI passes", or just "merge this PR". Codex (a second model) does the rebase and the final review; Claude triages, fixes agreed findings, gates on CI, and executes the merge. Prefer this over a bare `gh pr merge` so the PR is second-opinion-reviewed and CI-gated first.
-argument-hint: "[pr-number] [optional review focus / instructions]"
 ---
 
 # Merge PR
@@ -51,6 +50,8 @@ Never merge a draft, a closed PR, or one that is already merged.
    - **Already reviewed and unchanged**: an existing substantive approval whose `submittedAt` postdates the head commit (`gh pr view <number> --json commits --jq '.commits[-1].committedDate'`).
 
    Otherwise, run the `/pr-review` skill against this PR (reuse the same worktree; pass along any user focus). It runs the Codex adversarial review, triages, applies agreed fixes, pushes, and files issues for out-of-scope findings. Its "ask first" bucket is binding here: any ambiguous/architectural/breaking finding means back out, summarize, and ask before merging.
+
+   A 👍 reaction from Codex means the PR looks good. Treat it as a positive Codex review, subject to the same current-head freshness requirement as any other review.
 
    Reviewed or skipped, still sweep existing unresolved PR comments — they're findings regardless:
    - Inline: `gh api repos/{owner}/{repo}/pulls/<number>/comments --jq '.[] | {user: .user.login, path, line, body}'`
