@@ -4,6 +4,15 @@ set -euxo pipefail
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
+# Shared shell configuration used by the Bash and Zsh entrypoints.
+rm -f ~/.kixelated.shellenv ~/.kixelated.shellrc
+ln -s "$DIR/shellenv" ~/.kixelated.shellenv
+ln -s "$DIR/shellrc" ~/.kixelated.shellrc
+
+# The machine's ~/.bashrc stays local; it just sources the tracked config.
+rm -f ~/.kixelated.bashrc && ln -s "$DIR/bashrc" ~/.kixelated.bashrc
+grep -qsF 'source ~/.kixelated.bashrc' ~/.bashrc || echo 'source ~/.kixelated.bashrc' >> ~/.bashrc
+
 # The machine's ~/.zshrc stays local; it just sources the tracked config.
 rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
 grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >> ~/.zshrc

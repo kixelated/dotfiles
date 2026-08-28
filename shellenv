@@ -1,0 +1,11 @@
+# Shared environment configuration for Bash and Zsh.
+
+[ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+case ":$PATH:" in
+*":$HOME/.local/bin:"*) ;;
+*) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
+# Kache: shared Rust compile cache across worktrees and repositories.
+command -v kache >/dev/null && export RUSTC_WRAPPER=kache
