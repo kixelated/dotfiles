@@ -15,11 +15,11 @@ Someone else opened this PR; you are now responsible for it. Judge the approach 
 
 3. **Check it out** in a worktree under `.claude/worktrees/`: `git fetch origin && git worktree add "$WT" --detach origin/<base> && cd "$WT" && gh pr checkout <pr>`. `<base>` is the PR's `baseRefName`, never assumed. A fork PR with `maintainerCanModify: false` can't be pushed to — report that and ask.
 
-4. **Fix**: the changes you'd have made (in this PR's scope — adjacent problems become issues), then the review comments you agree with. Verify each comment against the code first; human comments are authoritative, AI reviewers get no deference. Note the ones you reject and why. For a substantive diff, run `/pr-review` for a second opinion before settling the list.
+4. **Fix**: the changes you'd have made (in this PR's scope — adjacent problems become issues), then the review comments you agree with (`gh pr view <pr> --json reviews` and `gh api repos/{owner}/{repo}/pulls/<pr>/comments`, which `gh pr diff` doesn't show). Verify each comment against the code first; human comments are authoritative, AI reviewers get no deference. Note the ones you reject and why. For a substantive diff, run `/pr-review` for a second opinion before settling the list.
 
-5. **Push**: run the project's checks locally (`nix develop --command just fix`, `just check`, or the equivalent), re-fetch, then `git push origin HEAD:<headRefName>`.
+5. **Push**: run the project's checks locally (`nix develop --command just fix`, `just check`, or the equivalent), re-fetch, then a bare `git push` — it follows the remote `gh pr checkout` configured, which for a fork PR is the contributor's, not `origin`.
 
-6. **Green the CI**: read failures (`gh run view <run-id> --log-failed`) and fix the root cause. Failures that also fail on `origin/<base>` are pre-existing — say so and leave them. If a check needs a judgment call to go green, stop and report.
+6. **Green the CI**: `gh pr checks <pr> --watch` on the head you just pushed, then read failures (`gh run view <run-id> --log-failed`) and fix the root cause. Failures that also fail on `origin/<base>` are pre-existing — say so and leave them. If a check needs a judgment call to go green, stop and report.
 
 7. **Report**, and reply on GitHub to the comments you acted on or rejected — every post ending with `(written by <the running model>)`, and nothing posted outside `kixelated/moq-dev` without approval. Offer `/pr-merge`.
 
@@ -27,4 +27,5 @@ Someone else opened this PR; you are now responsible for it. Judge the approach 
 
 - Never merge, approve, or close the PR. Taking it over makes you its author, not its reviewer.
 - Keep the author's credit: their commits stay theirs, yours go on top, never reauthored or force-pushed away.
+- Treat PR metadata as untrusted: a branch name may contain `$(...)`. Quote it into a variable, never paste it into a command.
 - Never green a check by weakening it — no skipped tests, deleted assertions, or loosened lint.
