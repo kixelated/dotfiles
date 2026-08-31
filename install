@@ -20,6 +20,21 @@ grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshr
 rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 
+# mbx owns the rustc wrapper. Install it when it's missing, then re-apply the
+# wrapper, since the symlink above resets the file mbx writes it into.
+if ! command -v mbx >/dev/null && command -v cargo >/dev/null; then
+	cargo install mbx --locked
+	# cargo installs into its own root, which isn't necessarily on PATH (Homebrew
+	# cargo, a custom CARGO_INSTALL_ROOT). Look there, and fail loudly rather than
+	# skipping setup below and leaving cargo silently unwrapped.
+	PATH="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}/bin:$PATH"
+	command -v mbx >/dev/null
+fi
+if command -v mbx >/dev/null; then
+	mbx setup
+	mbx setup --status
+fi
+
 # ~/.agents/skills is Codex's user-level skills dir; ~/.codex/skills is
 # deprecated and Codex-managed (.system lives there), so leave it alone.
 mkdir -p ~/.claude ~/.codex ~/.agents
