@@ -24,6 +24,11 @@ mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml
 # wrapper, since the symlink above resets the file mbx writes it into.
 if ! command -v mbx >/dev/null && command -v cargo >/dev/null; then
 	cargo install mbx --locked
+	# cargo installs into its own root, which isn't necessarily on PATH (Homebrew
+	# cargo, a custom CARGO_INSTALL_ROOT). Look there, and fail loudly rather than
+	# skipping setup below and leaving cargo silently unwrapped.
+	PATH="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}/bin:$PATH"
+	command -v mbx >/dev/null
 fi
 if command -v mbx >/dev/null; then
 	mbx setup
