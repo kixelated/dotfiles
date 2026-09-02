@@ -1,0 +1,12 @@
+#!/bin/sh
+# Podman speaks the Docker CLI, so tools that shell out to `docker` work
+# unmodified. Nothing else on the machine provides that name.
+#
+# /opt/podman/bin reaches PATH through /etc/paths.d, which only login shells
+# read, while this shim is on PATH in every shell. Fall back to the absolute
+# path so it doesn't die on "podman: command not found" in the gap.
+if command -v podman >/dev/null 2>&1; then
+	exec podman "$@"
+fi
+
+exec /opt/podman/bin/podman "$@"
