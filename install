@@ -18,6 +18,10 @@ rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
 grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >> ~/.zshrc
 
 rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
+
+# ~/.local/bin is already on PATH via shellenv.
+mkdir -p ~/.local/bin
+rm -f ~/.local/bin/docker && ln -s "$DIR/bin/docker" ~/.local/bin/docker
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 
 # mbx owns the rustc wrapper. Install it when it's missing, then re-apply the
