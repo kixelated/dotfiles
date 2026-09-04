@@ -10,7 +10,7 @@ Work the tree in **rounds**. The **frontier** is every decision whose prerequisi
 
 Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment, dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
+Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment, go find it yourself, delegating to a sub-agent if you have one; don't ask the user for anything you could look up. Don't block on it: an in-flight lookup is an unsettled prerequisite, so only the questions downstream of it wait for the answer; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
 
 When the frontier conflicts with a settled decision, known constraint, or existing design, challenge the user and ask whether the earlier decision or the current scope should change.
 

@@ -12,6 +12,5 @@ If unsure about any course of action, pause and prompt the user for guidance.
 - Wait for a recent, automated Codex and CodeRabbit (public repos only) review. Codex reacts with thumbs up if there are no findings.
 - Address any findings you agree with. Turn down any you disagree with with a comment.
 - Push any changes you made to the PR, updating the summary if needed, and repeat the review process.
-- On private repos, do not rely on auto-merge to gate CI; wait until all CI checks pass before enabling it.
-- Enable auto-merge if the PR is ready.
+- Enable auto-merge once the PR is ready. On private repos auto-merge does not gate on CI, so wait for the checks to pass before enabling it.
 - When the PR is merged, leave a summary of the changes made and any potential follow-up actions.
