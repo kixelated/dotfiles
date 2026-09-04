@@ -13,4 +13,4 @@ If unsure about any course of action, prompt the user for guidance.
 - Address any automated review findings (Codex/CodeRabbit) you agree with. Turn down any you disagree with with a comment.
 - Push any changes you made to the PR, updating the summary if needed.
 - Summarize the changes made and any potential follow-up actions.
-- No not merge the PR until a /pr-merge is approved.
+- No not merge the PR until a /merge is approved.
