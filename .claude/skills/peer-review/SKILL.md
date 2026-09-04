@@ -3,11 +3,10 @@ name: peer-review
 description: Run an adversarial Codex review of the working tree or current branch. Use when the user invokes /peer-review or wants Codex's second opinion on changes that aren't a PR yet. Review-only; returns Codex's findings verbatim and never fixes anything.
 ---
 
-# Codex adversarial review
+Get a second opinion from Codex, which challenges the approach, design, and assumptions rather than just the implementation.
+This skill is review-only: return Codex's output verbatim, and never fix, patch, or promise changes.
 
-Run Codex's challenge review through the runtime vendored with these dotfiles. It questions the chosen approach, design, and assumptions, not just implementation defects. This skill is review-only: run the review and return Codex's output verbatim; do not fix, patch, or promise changes. For reviewing an open PR (with triage and fixes), use `/pr-review` instead.
-
-Locate the runtime, preferring the vendored copy and falling back to the Claude plugin cache:
+Locate the runtime, preferring the copy vendored with these dotfiles and falling back to the plugin cache:
 
 ```bash
 DOTFILES="$(realpath ~/.claude/skills/../..)"
@@ -16,12 +15,12 @@ COMPANION="$DOTFILES/vendor/codex-plugin-cc/plugins/codex/scripts/codex-companio
 node "$COMPANION" setup --json   # confirm "ready": true
 ```
 
-If neither exists or setup isn't ready, say so and offer `/code-review` as a Claude-only fallback; don't silently substitute yourself for the second opinion.
+If neither exists or setup isn't ready, say so and offer `/code-review` as a Claude-only fallback. Don't silently substitute yourself for the second opinion.
 
-Then run it, passing `$ARGUMENTS` through unmodified (it supports `--wait`/`--background`, `--base <ref>`, `--scope auto|working-tree|branch`, and trailing focus text):
+Then run it, passing the arguments through unmodified. It supports `--wait`/`--background`, `--base <ref>`, `--scope auto|working-tree|branch`, and trailing focus text:
 
 ```bash
 node "$COMPANION" adversarial-review $ARGUMENTS
 ```
 
-Size the diff first (`git diff --shortstat`, or `git diff --shortstat <base>...HEAD` for branch scope). Unless the user passed `--wait` or `--background`, run tiny reviews (1-2 files) in the foreground and everything else as a background Bash call (`run_in_background: true`), telling the user the review is running; the result arrives as a task notification. Either way, return Codex's output exactly as-is.
+Size the diff first (`git diff --shortstat`, or `git diff --shortstat <base>...HEAD` for branch scope). Unless the user passed `--wait` or `--background`, run tiny reviews of one or two files in the foreground and everything else in the background, telling the user the review is running; the result arrives as a notification. Either way, return Codex's output exactly as-is.
