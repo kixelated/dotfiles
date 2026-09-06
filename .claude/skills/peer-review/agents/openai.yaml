@@ -1,0 +1,4 @@
+interface:
+  display_name: "Peer Review"
+  short_description: "Adversarial review using another coding agent"
+  default_prompt: "Use $peer-review to get an adversarial second opinion on the current changes."
