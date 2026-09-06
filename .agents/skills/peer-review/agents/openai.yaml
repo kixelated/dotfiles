@@ -1,4 +1,4 @@
 interface:
   display_name: "Peer Review"
-  short_description: "Adversarial second-opinion review via headless Claude Code"
-  default_prompt: "Use $peer-review to get Claude's adversarial second opinion on the current changes."
+  short_description: "Adversarial review using another coding agent"
+  default_prompt: "Use $peer-review to get an adversarial second opinion on the current changes."
