@@ -19,9 +19,12 @@ grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshr
 
 rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 
-# ~/.local/bin is already on PATH via shellenv.
+# ~/.local/bin is already on PATH via shellenv, so everything in bin/ becomes a
+# command by being linked there.
 mkdir -p ~/.local/bin
-rm -f ~/.local/bin/docker && ln -s "$DIR/bin/docker" ~/.local/bin/docker
+for f in "$DIR"/bin/*; do
+	rm -f ~/.local/bin/"$(basename "$f")" && ln -s "$f" ~/.local/bin/"$(basename "$f")"
+done
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 mkdir -p ~/.config/mise
 rm -f ~/.config/mise/config.toml && ln -s "$DIR/mise/config.toml" ~/.config/mise/config.toml
