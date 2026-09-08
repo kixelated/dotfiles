@@ -17,6 +17,12 @@ case ":$PATH:" in
 *) export PATH="$HOME/.local/bin:$PATH" ;;
 esac
 
+# Expose mise-managed global tools in non-interactive shells such as CI runners.
+case ":$PATH:" in
+*":$HOME/.local/share/mise/shims:"*) ;;
+*) export PATH="$HOME/.local/share/mise/shims:$PATH" ;;
+esac
+
 # mbx installs a Cargo shim here; it must precede the real Cargo binary.
 case ":$PATH:" in
 *":$HOME/.local/share/mbx/bin:"*) ;;
