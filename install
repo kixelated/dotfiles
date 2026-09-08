@@ -50,4 +50,9 @@ ln -s "$DIR/.claude/skills" ~/.claude/skills
 ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/skills" ~/.agents/skills
 
+# Repositories can explicitly opt into this loader through their trusted
+# .codex/config.toml and a reviewed hook that captures the environment.
+rm -f ~/.codex/bash-env.sh
+ln -s "$DIR/codex/bash-env.sh" ~/.codex/bash-env.sh
+
 git submodule update --init --remote
