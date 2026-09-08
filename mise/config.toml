@@ -1,0 +1,5 @@
+wrappers = { cargo = { command = "mbx", env = { MBX_CARGO_SHIM_MODE = "1" } } }
+
+[tools.mr-boxington]
+version = "latest"
+minimum_release_age = "3d"
