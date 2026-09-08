@@ -9,8 +9,9 @@ If unsure about any course of action, pause and prompt the user for guidance.
 - Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
 - If a draft, flip it to open.
 - Fix any issues with the PR, such as merge conflicts and failing CI checks.
-- Wait for a recent, automated Codex and CodeRabbit (public repos only) review. Codex reacts with thumbs up if there are no findings.
+- Wait for the automatic Codex and CodeRabbit (public repos only) reviews of the current head. Never request one; an @codex or @coderabbitai mention is banned. Codex reacts with thumbs up if there are no findings.
 - Address any findings you agree with. Turn down any you disagree with with a comment.
-- Push any changes you made to the PR, updating the summary if needed, and repeat the review process.
+- Push any changes you made to the PR, updating the summary if needed.
+- That is one round. If the next automatic review still has findings, or you are backing out for any other reason, stop and prompt the user interactively with the options (fix once more, merge as is, leave the PR open, close it) and a recommended one.
 - Enable auto-merge once the PR is ready. On private repos auto-merge does not gate on CI, so wait for the checks to pass before enabling it.
 - When the PR is merged, leave a summary of the changes made and any potential follow-up actions.
