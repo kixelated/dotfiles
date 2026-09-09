@@ -10,3 +10,7 @@
 
 - Every GitHub post you author must end with a `(written by <model>)` line naming the running model. This is separate from the `Co-Authored-By` trailer on commits.
 - Don't comment on non kixelated/moq-dev repos without approval.
+
+# Loops
+
+- Back out when minimal progress is being made, rather than burn tokens.
