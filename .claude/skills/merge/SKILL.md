@@ -4,7 +4,7 @@ description: Merge a GitHub PR once reviews and CI pass.
 ---
 
 Land a pull request.
-If unsure about any course of action, pause and prompt the user for guidance.
+If unsure about any course of action, pause and interactively prompt the user for guidance.
 
 - Parse the arguments to determine the PR number, otherwise resolve it from the current context/branch.
 - If a draft, flip it to "Ready for Review" and wait for automated reviews to complete.
