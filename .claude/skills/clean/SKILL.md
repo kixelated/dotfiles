@@ -8,8 +8,8 @@ If unsure about any course of action, keep it, and say why.
 
 ## Guardrails
 
-- Never delete by hand: no `rm`, `find -delete`, trash commands, or `git worktree remove --force`. Never delete branches.
-- Never touch dependency dirs (`node_modules`, venvs, vendored sources), and never purge a whole cache, volume, or container VM unless the user names that action.
+- Never delete by hand: no `rm`, `find -delete`, trash commands, or unguarded `git worktree remove --force`. Never delete branches.
+- Never manually delete dependency dirs (`node_modules`, venvs, vendored sources). A project cleanup recipe may remove reproducible dependencies in a finished checkout. Never purge a whole cache, volume, or container VM unless the user names that action.
 - A missing activity signal means "assume active". A failed or contradictory check means preserve and report.
 
 ## Audit
@@ -27,11 +27,17 @@ Default roots are the current checkout, `~/.codex/worktrees`, and `~/work/*/.cla
 
 A worktree is removable only when it is registered, unlocked, not the main worktree, clean including untracked files, has no activity signal, and its branch is merged into the base or its upstream is gone (for detached HEAD, its commit is reachable from a branch or tag). Everything else is protected; recency alone proves nothing.
 
-Show a table (path, branch, state, size, intended action) before mutating, and pause for confirmation if scope or activity is uncertain. Remove with `git -C <surviving-worktree> worktree remove <abs-path>`, no force; if git refuses, keep it and report why. Then `git worktree prune --dry-run --verbose`, pruning for real only when every listed entry is verifiably gone.
+Show a table (path, branch, state, size, intended action) before mutating, and pause for confirmation if scope or activity is uncertain. Use `clean.sh --dry-run` to audit and `clean.sh` to retire eligible worktrees. Its helper permits exactly one `--force` for submodule worktrees only after checking files, local-only submodule history, locks and activity. Never add force manually or use double-force; a failed inspection preserves the checkout. Leave missing registrations alone unless their absence is independently verified; a timer cannot distinguish deletion from an unmounted disk.
 
 ## Build artifacts
 
 Build output in a *retained* worktree can still be cleaned, as long as no process is running in or building from that checkout. Use the project's own clean command, largest target first, measuring before and after: `cargo clean`, `./gradlew clean`, `swift package clean`, `go clean ./...`, `dotnet clean`, `cmake --build <dir> --target clean`, `bazel clean` (never `--expunge`), or a repo-level recipe whose definition you have read. No safe native command means skip and report; never substitute raw deletion, and don't install tools just to clean.
+
+Use `just clean` for a finished MoQ checkout: it includes initialized submodule
+build output and MBX-managed targets while preserving source and local state.
+`clean.sh --gc` additionally runs MBX GC with a 25GiB object-cache budget when
+builds and managed targets are idle. The local systemd timer uses this mode. Completed checkouts with ignored local
+state retain that state and their source, but can release idle MBX targets.
 
 ## Caches and containers
 
