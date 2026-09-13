@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically retire inactive agent worktrees
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=1min
+Unit=worktree-clean.service
+
+[Install]
+WantedBy=timers.target
