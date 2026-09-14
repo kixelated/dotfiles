@@ -88,6 +88,14 @@ ARTIFACTS = {
     ".ruff_cache",
     ".venv",
     "venv",
+    # wrangler regenerates both; `just clean` in moq.pro sweeps them too.
+    ".wrangler",
+    "worker-configuration.d.ts",
+    ".terraform",
+    # moq.pro: downloaded demo media and the playwright dev-login state.
+    "media",
+    ".auth",
+    "test-results",
 }
 
 
@@ -259,9 +267,15 @@ def repositories(roots):
         for directory, dirs, files in os.walk(root):
             path = Path(directory)
             if ".git" in dirs or ".git" in files:
-                common = text(
-                    path, "rev-parse", "--path-format=absolute", "--git-common-dir"
-                )
+                try:
+                    common = text(
+                        path, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                    )
+                except subprocess.CalledProcessError:
+                    # A stray .git (an empty dir, a broken gitfile) is not a
+                    # repository; skip it rather than abort the whole sweep.
+                    print(f"skip: {path}: not a git repository", flush=True)
+                    continue
                 if common not in seen:
                     seen.add(common)
                     yield path

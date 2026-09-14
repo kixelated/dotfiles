@@ -123,7 +123,9 @@ START_FREE=$(free_kib)
 : >"$REPOS"
 for root in "${ROOTS[@]}"; do
 	[ -d "$root" ] || continue
-	find "$root" -maxdepth 3 -name .git -print -prune 2>/dev/null |
+	# Unreadable siblings (systemd-private-* under /tmp) make find exit 1,
+	# which pipefail would turn into a silent abort of the whole script.
+	{ find "$root" -maxdepth 3 -name .git -print -prune 2>/dev/null || true; } |
 		sed 's#/\.git$##' >>"$REPOS"
 done
 sort -u -o "$REPOS" "$REPOS"
