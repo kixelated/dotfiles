@@ -28,3 +28,7 @@ case ":$PATH:" in
 *":$HOME/.local/share/mbx/bin:"*) ;;
 *) export PATH="$HOME/.local/share/mbx/bin:$PATH" ;;
 esac
+
+# Claude Code caps a single Bash tool call at 10 minutes by default; long
+# watches (stock polls, soak tests) should not need re-arming every 10 minutes.
+export BASH_MAX_TIMEOUT_MS=3600000
