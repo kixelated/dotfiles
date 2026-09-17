@@ -1,5 +1,5 @@
 ---
-name: spawn_merge
+name: spawn-merge
 description: Decide and merge GitHub PRs in parallel.
 ---
 
