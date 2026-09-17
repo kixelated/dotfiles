@@ -14,3 +14,8 @@
 # Loops
 
 - Back out when minimal progress is being made, rather than burn tokens.
+
+# Development
+
+- Default to making worktrees. Put them in a `.worktrees` directory within the repository root.
+- Focus on simplification.
