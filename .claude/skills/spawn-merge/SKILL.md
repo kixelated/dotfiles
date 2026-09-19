@@ -23,7 +23,7 @@ There can be at most N concurrent merge operations, where N is half the number o
 If the user chooses to close the PR, run the /close command using a sub-agent.
 No maximum concurrency is enforced.
 
-Keep going until all PRs have been decided.
-Then wait for all spawned sub-agents to finish.
+Keep going until all PRs have been decided then wait for all spawned sub-agents to finish.
 
 Summarize the results when done.
+Include all of the issues encountered and suggested follow-ups.
