@@ -28,6 +28,8 @@ done
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
 mkdir -p ~/.config/mise
 rm -f ~/.config/mise/config.toml && ln -s "$DIR/mise/config.toml" ~/.config/mise/config.toml
+mkdir -p ~/.config/opencode
+rm -f ~/.config/opencode/opencode.jsonc && ln -s "$DIR/opencode/opencode.jsonc" ~/.config/opencode/opencode.jsonc
 
 # mise follows mbx's rapid releases while the tracked wrapper keeps plain Cargo
 # routed through it. setup also installs the shim used outside mise activation.
