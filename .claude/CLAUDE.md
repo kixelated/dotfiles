@@ -5,11 +5,12 @@
 - Prioritize refactoring for long-term code maintainability.
 - Pro-actively do any background research and explore the state-of-the-art.
 - Use interactive prompts when unsure about a decision, including a recommendation.
+- If an instruction in this file is ambiguous, or you had to guess which reading was meant, surface it and propose clearer wording instead of silently picking one.
 
 # GitHub
 
-- Every GitHub post you author must end with a `(written by <model>)` line naming the running model. This is separate from the `Co-Authored-By` trailer on commits.
-- Don't comment on non kixelated/moq-dev repos without approval.
+- Every GitHub post you author must end with a `(written by <model>)` line naming the running model by display name, e.g. `(written by Opus 5)` — not the model ID. This is separate from the `Co-Authored-By` trailer on commits.
+- Don't comment on repos outside the `kixelated` and `moq-dev` orgs without approval.
 
 # Loops
 
