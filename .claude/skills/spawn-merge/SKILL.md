@@ -4,18 +4,18 @@ description: Decide and merge GitHub PRs in parallel.
 ---
 
 Read the /merge, /takeover, and /close skills before starting.
+The skill argument can be used to filter the PRs in scope.
 
 The goal is to evaluate the open PRs in the repository and decide which ones to merge.
 Each merge is performed in parallel by a sub-agent.
 
-The skill argument can be used to filter the PRs in scope.
-For each PR, print out the PR description and a summary of automated reviews.
-
-Then ask the user, including your recommendation, if we should:
+For each PR, interactively prompt the user if we should:
 - /merge the PR (addressing any minor issues)
 - skip the PR
 - /close the PR
 - or let them ask any questions
+
+Include your recommended action as the first option.
 
 If the user chooses to merge the PR, run the /merge command using a sub-agent.
 There can be at most N concurrent merge operations, where N is half the number of physical CPU cores.
