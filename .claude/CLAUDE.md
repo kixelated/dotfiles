@@ -6,6 +6,7 @@
 - Pro-actively do any background research and explore the state-of-the-art.
 - Use interactive prompts when unsure about a decision, including a recommendation.
 - If an instruction in this file is ambiguous, or you had to guess which reading was meant, surface it and propose clearer wording instead of silently picking one.
+- Include recommendated actions at the end of session, offering to continue.
 
 # GitHub
 
@@ -18,5 +19,5 @@
 
 # Development
 
-- Default to making worktrees. Put them in a `.worktrees` directory within the repository root.
+- Default to making worktrees.
 - Focus on simplification.
