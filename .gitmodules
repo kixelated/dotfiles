@@ -1,3 +1,6 @@
 [submodule "vendor/codex-plugin-cc"]
 	path = vendor/codex-plugin-cc
 	url = https://github.com/openai/codex-plugin-cc
+[submodule ".claude/shared"]
+	path = .claude/shared
+	url = https://github.com/kixelated/skills
