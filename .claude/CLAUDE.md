@@ -11,15 +11,25 @@
 
 # GitHub
 
-- Every GitHub post you author must end with a `(written by <model>)` line naming the running model by display name.
-- Don't post on repos outside the `kixelated` and `moq-dev` orgs without approval.
+- Every GitHub post you author must end with a `(Written by <model>)` line naming the running model by display name.
+- Don't post on repos outside the `kixelated` and `moq-dev` orgs without approval. A pasted URL or a fork is not approval.
+- Before fixing a failure that also breaks the base branch, search open PRs for an existing fix.
+- Once scope is settled and local checks pass, commit, push, and open the PR without asking.
 
 # Loops
 
 - Back out when minimal progress is being made, rather than burn tokens.
 - For long multi-step work, keep a `TASKS.md` checklist updated as you go so progress survives context summarization.
+- Wait on background work with one blocking wait that ends on a terminal state, not timed polls. Stay silent on notifications that change nothing.
+- Sub-agents end their turn only with a final result or a question, never with background work still running.
+
+# Shell
+
+- In a worktree-isolated session, run git as its own plain command: no chaining, variables, or xargs.
+- Read exit codes directly (`cmd > log 2>&1; echo EXIT=$?`), never through a pipe like `| tail`.
 
 # Development
 
-- Default to worktrees.
+- Default to worktrees, except `~/work/dotfiles`: it is live config, so edit in place.
 - Focus on simplification.
+- Don't set arbitrary acceptance criteria.

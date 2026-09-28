@@ -2,3 +2,10 @@
 # incremental artifacts can't be shared and just burn disk.
 [build]
 incremental = false
+
+# No debug info in dev/test builds: it's only for interactive debuggers, and it
+# inflates every linked binary (~40%) and the bytes rewritten per rebuild.
+# Panic messages still report file:line; backtrace frames just lose it.
+# Overrides each repo's Cargo.toml [profile.dev] (profile.test inherits it).
+[profile.dev]
+debug = false
