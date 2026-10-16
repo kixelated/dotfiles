@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euxo pipefail
 
-DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 rm -f ~/.vimrc && ln -s "$DIR/vimrc" ~/.vimrc
 # Shared shell configuration used by the Bash and Zsh entrypoints.
@@ -11,11 +11,11 @@ ln -s "$DIR/shellrc" ~/.kixelated.shellrc
 
 # The machine's ~/.bashrc stays local; it just sources the tracked config.
 rm -f ~/.kixelated.bashrc && ln -s "$DIR/bashrc" ~/.kixelated.bashrc
-grep -qsF 'source ~/.kixelated.bashrc' ~/.bashrc || echo 'source ~/.kixelated.bashrc' >> ~/.bashrc
+grep -qsF 'source ~/.kixelated.bashrc' ~/.bashrc || echo 'source ~/.kixelated.bashrc' >>~/.bashrc
 
 # The machine's ~/.zshrc stays local; it just sources the tracked config.
 rm -f ~/.kixelated.zshrc && ln -s "$DIR/zshrc" ~/.kixelated.zshrc
-grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >> ~/.zshrc
+grep -qsF 'source ~/.kixelated.zshrc' ~/.zshrc || echo 'source ~/.kixelated.zshrc' >>~/.zshrc
 
 rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 
@@ -23,6 +23,7 @@ rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 # command by being linked there.
 mkdir -p ~/.local/bin
 for f in "$DIR"/bin/*; do
+	[ -f "$f" ] || continue
 	rm -f ~/.local/bin/"$(basename "$f")" && ln -s "$f" ~/.local/bin/"$(basename "$f")"
 done
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
@@ -37,6 +38,15 @@ command -v mise >/dev/null
 mise install mr-boxington
 mise exec -- mbx setup --global
 mise exec -- mbx setup --global --status
+
+# The timer runs as this user, using the same checkout as the linked commands.
+if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null; then
+	if systemctl --user show-environment >/dev/null 2>&1; then
+		"$DIR/bin/install-worktree-clean.sh"
+	else
+		echo "Skipping worktree timer: no running systemd user manager"
+	fi
+fi
 
 # ~/.agents/skills is Codex's user-level skills dir; ~/.codex/skills is
 # deprecated and Codex-managed (.system lives there), so leave it alone.

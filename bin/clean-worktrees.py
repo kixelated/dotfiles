@@ -3,11 +3,16 @@
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
-from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
+import uuid
+from functools import cache
+from pathlib import Path
 
 
 class Preserve(RuntimeError):
@@ -34,6 +39,7 @@ def processes():
         capture_output=True,
         cwd="/",  # The inspector itself must not look like checkout activity.
         text=True,
+        check=False,
     )
     if result.returncode or not result.stdout:
         raise Preserve(f"cannot inspect activity: {result.stderr.strip()}")
@@ -44,9 +50,12 @@ def processes():
     return paths
 
 
-def idle(paths):
-    for active in processes():
-        if any(active == path or path in active.parents for path in paths):
+def idle(paths, activity=None):
+    roots = {str(path) for path in paths}
+    prefixes = tuple(path.rstrip("/") + "/" for path in roots)
+    for active in processes() if activity is None else activity:
+        name = str(active)
+        if name in roots or name.startswith(prefixes):
             raise Preserve(f"active process uses {active}")
 
 
@@ -115,27 +124,232 @@ def clean(repo):
         raise Preserve(f"dirty or untracked files in {repo}")
 
 
-def check_local_data(repo):
+def local_data(repo):
+    """Find ignored data, rejecting nested repositories even inside artifacts."""
+    inspected = set()
+    found = []
     for raw in git(
         repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"
     ).split(b"\0"):
         if raw:
             path = Path(os.fsdecode(raw))
+            full = repo / path
+            if path.is_absolute() or ".." in path.parts:
+                raise Preserve(f"ignored path escapes checkout: {path}")
+            for parent in (full, *full.parents):
+                if parent == repo:
+                    break
+                if parent in inspected:
+                    break
+                inspected.add(parent)
+                if (
+                    parent.name == ".git"
+                    or (parent / ".git").exists()
+                    or (parent / ".git").is_symlink()
+                    or ((parent / "HEAD").is_file() and (parent / "objects").is_dir())
+                ):
+                    raise Preserve(f"independent nested Git repository: {parent}")
+                if parent != full and parent.is_symlink():
+                    raise Preserve(f"ignored path traverses a symlink: {full}")
+            if full.is_dir() and not full.is_symlink():
+                raise Preserve(f"opaque ignored directory: {full}")
             if not (
                 set(path.parts[:-1]) & ARTIFACTS
                 or path.name in ARTIFACTS
                 or path.suffix == ".tsbuildinfo"
             ):
-                raise Preserve(f"ignored local data: {repo / path}")
+                found.append(full)
+    return found
 
 
-def eligible(repo, entry):
+def fingerprint(path):
+    info = path.lstat()
+    if path.is_symlink():
+        content = {"symlink": os.readlink(path)}
+    elif path.is_file():
+        with path.open("rb") as stream:
+            content = {"sha256": hashlib.file_digest(stream, "sha256").hexdigest()}
+    else:
+        raise Preserve(f"unsupported local data: {path}")
+    return {
+        **content,
+        "mode": info.st_mode,
+        "size": info.st_size,
+        "mtime_ns": info.st_mtime_ns,
+    }
+
+
+def archive_local_data(wt, paths, dry):
+    """Copy and verify data before Git removes its original checkout."""
+    state = Path(
+        os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
+    ).resolve()
+    destination = state / "worktree-clean/archives" / uuid.uuid4().hex
+    print(f"  archive {len(paths)} local files: {destination}", flush=True)
+    if dry:
+        return {}
+    destination.mkdir(parents=True, mode=0o700)
+    manifest = {"worktree": str(wt), "head": text(wt, "rev-parse", "HEAD"), "files": {}}
+    for source in paths:
+        relative = source.relative_to(wt)
+        before = fingerprint(source)
+        target = destination / "files" / relative
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copy2(source, target, follow_symlinks=False)
+        if not target.is_symlink():
+            with target.open("rb") as stream:
+                os.fsync(stream.fileno())
+        if fingerprint(source) != before or fingerprint(target) != before:
+            raise Preserve(f"archive verification failed: {source}; kept {destination}")
+        manifest["files"][str(relative)] = before
+    with (destination / "manifest.json").open("x") as stream:
+        json.dump(manifest, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    # Persist directory entries too; source deletion must not outrun the backup.
+    directories = {destination}
+    parent = destination.parent
+    while parent != state.parent:
+        directories.add(parent)
+        parent = parent.parent
+    for source in paths:
+        parent = (destination / "files" / source.relative_to(wt)).parent
+        while parent != destination:
+            directories.add(parent)
+            parent = parent.parent
+    for directory in sorted(
+        directories, key=lambda path: len(path.parts), reverse=True
+    ):
+        fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    return {wt / path: value for path, value in manifest["files"].items()}
+
+
+def ancestor(repo, head, ref):
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", head, ref],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise Preserve(f"cannot inspect merge ancestry: {ref}")
+    return result.returncode == 0
+
+
+@cache
+def pull_request_evidence(repo):
+    """Cache both successes and failures, avoiding an API retry per worktree."""
+    url = text(repo, "remote", "get-url", "origin")
+    match = re.fullmatch(
+        r"(?:https://github\.com/|git@github\.com:)([^/]+)/([^/]+?)(?:\.git)?/?", url
+    )
+    if not match:
+        return []
+    query = """query($owner:String!,$name:String!,$endCursor:String){
+      repository(owner:$owner,name:$name){
+        pullRequests(first:100,states:MERGED,after:$endCursor){
+          nodes{headRefName headRefOid baseRefName mergeCommit{oid}}
+          pageInfo{hasNextPage endCursor}
+        }
+      }
+    }"""
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "graphql",
+                "--paginate",
+                "--slurp",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={match[1]}",
+                "-F",
+                f"name={match[2]}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return Preserve(f"cannot verify merged pull requests: {error}")
+    if result.returncode:
+        return Preserve(f"cannot verify merged pull requests: {result.stderr.strip()}")
+    try:
+        pages = json.loads(result.stdout)
+        prs = [
+            pr
+            for page in pages
+            for pr in page["data"]["repository"]["pullRequests"]["nodes"]
+        ]
+        if not isinstance(pages, list) or not all(isinstance(pr, dict) for pr in prs):
+            raise ValueError("expected paginated PR objects")
+        return prs
+    except (ValueError, KeyError, TypeError):
+        return Preserve("invalid merged pull request response")
+
+
+def merged_pull_requests(repo):
+    evidence = pull_request_evidence(repo)
+    if isinstance(evidence, Preserve):
+        raise evidence
+    return evidence
+
+
+def completed_branch(repo, entry, head):
+    for ref in (
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        "refs/remotes/origin/master",
+    ):
+        if text(repo, "for-each-ref", "--format=%(refname)", ref) and ancestor(
+            repo, head, ref
+        ):
+            return
+    branch = entry["branch"].removeprefix("refs/heads/")
+    # An inherited upstream of origin/main is not this feature's PR branch.
+    # Only use "gone upstream" when it actually tracked this branch's name.
+    upstream = text(repo, "for-each-ref", "--format=%(upstream)", entry["branch"])
+    remote = (
+        text(repo, "config", "--get", f"branch.{branch}.remote") if upstream else ""
+    )
+    if (
+        remote == "origin"  # This is the remote main() refreshes before removal.
+        and upstream == f"refs/remotes/{remote}/{branch}"
+        and not text(repo, "for-each-ref", "--format=%(refname)", upstream)
+    ):
+        return
+    # Exact head avoids retiring work added after a PR merged. The merge commit
+    # must also survive on the PR's actual base (which can be release, not main).
+    if "origin" in text(repo, "remote").splitlines():
+        for pr in merged_pull_requests(repo):
+            if pr.get("headRefName") != branch or pr.get("headRefOid") != head:
+                continue
+            merge = pr.get("mergeCommit") or {}
+            base = f"refs/remotes/origin/{pr.get('baseRefName', '')}"
+            if (
+                isinstance(merge, dict)
+                and re.fullmatch(r"[0-9a-f]{40,64}", merge.get("oid", ""))
+                and text(repo, "for-each-ref", "--format=%(refname)", base)
+                and ancestor(repo, merge["oid"], base)
+            ):
+                return
+    raise Preserve(
+        "branch has no verified completion (base ancestry, matching merged PR, or gone branch upstream)"
+    )
+
+
+def eligible(repo, entry, activity=None):
     wt = Path(entry["worktree"])
     if "locked" in entry or "prunable" in entry or not wt.is_dir():
         raise Preserve("locked, missing or prunable")
     if wt.is_symlink() or wt.resolve() != wt:
         raise Preserve("noncanonical worktree path")
-    clean(wt)
     head = text(wt, "rev-parse", "HEAD")
     if "branch" not in entry:
         if not text(
@@ -143,31 +357,8 @@ def eligible(repo, entry):
         ):
             raise Preserve("detached commit has no surviving local branch or tag")
     else:
-        merged = False
-        for ref in (
-            "refs/remotes/origin/HEAD",
-            "refs/remotes/origin/main",
-            "refs/remotes/origin/master",
-        ):
-            refs = text(repo, "for-each-ref", "--format=%(refname)", ref).splitlines()
-            if not refs:
-                continue
-            result = subprocess.run(
-                ["git", "-C", str(repo), "merge-base", "--is-ancestor", head, ref],
-                capture_output=True,
-            )
-            if result.returncode not in (0, 1):
-                raise Preserve("cannot inspect merge ancestry")
-            merged = result.returncode == 0
-            break
-        if not merged:
-            upstream = text(
-                repo, "for-each-ref", "--format=%(upstream)", entry["branch"]
-            )
-            if not upstream.startswith("refs/remotes/"):
-                raise Preserve("unmerged branch without a remote upstream")
-            if text(repo, "for-each-ref", "--format=%(refname)", upstream):
-                raise Preserve("unmerged branch with an existing upstream")
+        completed_branch(repo, entry, head)
+    clean(wt)
     repos = [wt, *modules(wt)]
     for module in repos[1:]:
         clean(module)
@@ -178,7 +369,7 @@ def eligible(repo, entry):
         if text(module, "stash", "list"):
             raise Preserve(f"submodule stash: {module}")
     protected = repos + [(root / "target").resolve() for root in repos]
-    idle(protected)
+    idle(protected, activity)
     return repos
 
 
@@ -226,27 +417,42 @@ def workspace_targets(root):
     return found
 
 
-def retire(repo, entry, dry):
+def retire(repo, entry, dry, archive=False, activity=None):
     wt = Path(entry["worktree"])
-    repos = eligible(repo, entry)
+    repos = eligible(repo, entry, activity)
     # Refresh the lock and status after the audit, before releasing cache claims.
     fresh = next(item for item in worktrees(repo) if item["worktree"] == str(wt))
     if fresh != entry:
         raise Preserve("worktree registration changed during audit")
-    eligible(repo, fresh)
+    eligible(repo, fresh, activity)
+    # Inspect before MBX can remove an artifact directory containing user data.
+    for root in repos:
+        local_data(root)
     targets = workspace_targets(wt)
-    idle([wt, *(target for paths in targets.values() for target in paths)])
+    protected = [wt, *(target for paths in targets.values() for target in paths)]
+    idle(protected, activity)
     # MBX accepts a workspace path, including one with no recorded claim.
     for root in sorted(
         set(repos) | set(targets), key=lambda path: len(path.parts), reverse=True
     ):
-        idle([wt, *targets.get(root, []), (root / "target").resolve()])
+        idle(
+            [wt, *targets.get(root, []), (root / "target").resolve()],
+            activity if dry else None,
+        )
         execute(["mbx", "cache", "remove", root], dry)
-    eligible(repo, fresh)
-    # A completed checkout can retain local databases or ignored drafts. Release
-    # its disposable managed targets, but preserve the checkout and that data.
-    for root in repos:
-        check_local_data(root)
+    eligible(repo, fresh, activity)
+    # Ignored drafts and old package configs are data, not disposable artifacts.
+    paths = sorted(path for root in repos for path in local_data(root))
+    if paths and not archive:
+        raise Preserve(
+            f"ignored local data: {paths[0]} (use --archive-local-data to back up)"
+        )
+    saved = archive_local_data(wt, paths, dry) if paths else {}
+    if saved:
+        eligible(repo, fresh, activity)
+        current = sorted(path for root in repos for path in local_data(root))
+        if current != paths or any(fingerprint(path) != saved[path] for path in paths):
+            raise Preserve("local data changed during archive; backup retained")
     # Do not deinit: it mutates shared submodule configuration. Git owns removal
     # of the worktree and its per-worktree module metadata. One force only.
     has_modules = any(
@@ -256,6 +462,12 @@ def retire(repo, entry, dry):
     command = ["git", "-C", repo, "worktree", "remove"]
     if has_modules:
         command.append("--force")
+    # Preliminary scans can share a snapshot, but every mutation needs a fresh
+    # host inspection, including newly started processes and external targets.
+    idle(
+        [*protected, *((root / "target").resolve() for root in repos)],
+        activity if dry else None,
+    )
     execute([*command, wt], dry)
 
 
@@ -278,7 +490,9 @@ def repositories(roots):
                     continue
                 if common not in seen:
                     seen.add(common)
-                    yield path
+                    # Discovery may start inside a removable linked checkout.
+                    # Its shared gitdir survives every linked-tree retirement.
+                    yield Path(common)
                 dirs.clear()
             elif len(path.relative_to(root).parts) >= 4:
                 dirs.clear()
@@ -288,6 +502,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-n", "--dry-run", action="store_true")
     parser.add_argument("--root", action="append", type=Path)
+    parser.add_argument(
+        "--archive-local-data",
+        action="store_true",
+        help="back up and verify ignored local files before retirement; keep nested repositories",
+    )
     parser.add_argument(
         "--gc", action="store_true", help="also run MBX GC with a 25GiB object budget"
     )
@@ -302,11 +521,14 @@ def main():
         except BlockingIOError:
             print("cleanup already running")
             return
-        processes()  # Never interpret a sandbox's partial view as inactivity.
+        activity = (
+            processes()
+        )  # Never interpret a sandbox's partial view as inactivity.
         failures = False
         roots = args.root or [
             Path.home() / "work",
             Path.home() / ".codex/worktrees",
+            Path.home() / ".worktrees",
             Path("/tmp"),
         ]
         for repo in repositories([root.resolve() for root in roots]):
@@ -340,7 +562,7 @@ def main():
                 wt = entry["worktree"]
                 try:
                     print(f"inspect: {wt}", flush=True)
-                    retire(repo, entry, args.dry_run)
+                    retire(repo, entry, args.dry_run, args.archive_local_data, activity)
                 except Preserve as error:
                     print(f"keep: {wt}: {error}", flush=True)
                 except (
