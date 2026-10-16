@@ -17,7 +17,8 @@
 # Loops
 
 - Back out when minimal progress is being made, rather than burn tokens.
-- For long multi-step work, keep a `TASKS.md` checklist updated as you go so progress survives context summarization.
+- Before pausing for a blocking decision or handing off work, commit a checkpoint of meaningful source changes. Record what remains unresolved and which checks passed or were not run.
+- Keep disposable scratch out of checkpoints and remove it before handoff. Preserve source changes and local-only submodule commits before releasing a worktree.
 
 # Development
 
