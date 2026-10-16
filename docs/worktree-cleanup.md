@@ -1,19 +1,20 @@
 # Worktree cleanup
 
-On Linux with systemd, `./install` installs and enables the **user**
-`worktree-clean.timer`. The same step can be run separately with
-`bin/install-worktree-clean.sh`. Every 15 minutes the oneshot service scans
-`~/work`, `~/.codex/worktrees`, `~/.worktrees`, and `/tmp`. Overlapping runs are
-prevented with a lock. A full scan can exceed one timer interval; the service
-allows up to two hours for large inventories. Inspect it with:
+On Linux with systemd, `./install` installs the manual **user**
+`worktree-clean.service` and disables any old automatic cleanup timer. The same
+step can be run separately with `bin/install-worktree-clean.sh`. Start cleanup
+when needed; the oneshot service scans `~/work`, `~/.codex/worktrees`,
+`~/.worktrees`, and `/tmp`. Overlapping runs are prevented with a lock. The
+service allows up to two hours for large inventories:
 
 ```sh
-systemctl --user status worktree-clean.timer
+systemctl --user start worktree-clean.service
+systemctl --user status worktree-clean.service
 journalctl --user -u worktree-clean.service
 ```
 
 On hosts without a reachable systemd user manager (for example, containers),
-dotfiles installation skips the timer and continues configuring the other files.
+dotfiles installation skips the service and continues configuring the other files.
 
 The cleaner keeps main checkouts, locks, dirty/untracked files, hidden index
 changes, active processes and targets, submodule stashes, and local-only
