@@ -12,12 +12,14 @@ usage: clean.sh [options]
 Removes stale git worktrees, then optionally reclaims build output and the Nix
 store. A worktree is removed only when it is registered, unlocked, not the main
 checkout, clean including untracked files, has no process running inside it, and
-either its branch is merged into the base or its upstream is gone (detached
+either its branch is merged into the base, its exact HEAD has a verified merged
+PR, or its own branch upstream is gone (detached
 HEADs additionally need their commit reachable from some surviving ref).
 
 options:
   -n, --dry-run   report what would happen and change nothing
       --gc        also collect MBX storage with a 25GiB object budget
+      --archive-local-data  back up ignored local files before retiring a checkout
       --targets   also run `cargo clean` on build output in retained checkouts
       --nix       also run `nix store gc` (skipped when a Nix session is live)
       --all       --targets --nix
@@ -30,6 +32,7 @@ DRY_RUN=0
 DO_TARGETS=0
 DO_NIX=0
 DO_GC=0
+ARCHIVE_LOCAL_DATA=0
 ROOTS=()
 
 while [ $# -gt 0 ]; do
@@ -37,6 +40,7 @@ while [ $# -gt 0 ]; do
 	-n | --dry-run) DRY_RUN=1 ;;
 	--targets) DO_TARGETS=1 ;;
 	--gc) DO_GC=1 ;;
+	--archive-local-data) ARCHIVE_LOCAL_DATA=1 ;;
 	--nix) DO_NIX=1 ;;
 	--all)
 		DO_TARGETS=1
@@ -63,7 +67,7 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-[ ${#ROOTS[@]} -gt 0 ] || ROOTS=("$HOME/work" "$HOME/.codex/worktrees" /tmp)
+[ ${#ROOTS[@]} -gt 0 ] || ROOTS=("$HOME/work" "$HOME/.codex/worktrees" "$HOME/.worktrees" /tmp)
 
 # Resolve roots, because find does not descend through a symlinked argument and
 # /tmp is one on macOS, which would silently scan nothing.
@@ -136,6 +140,7 @@ script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 args=()
 [ "$DRY_RUN" = 0 ] || args+=(--dry-run)
 [ "$DO_GC" = 0 ] || args+=(--gc)
+[ "$ARCHIVE_LOCAL_DATA" = 0 ] || args+=(--archive-local-data)
 for root in "${ROOTS[@]}"; do args+=(--root "$root"); done
 python3 "$script_dir/clean-worktrees.py" "${args[@]}"
 

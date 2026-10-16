@@ -1,8 +1,11 @@
 import importlib.util
-from pathlib import Path
+import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
@@ -31,6 +34,8 @@ class CleanupTest(unittest.TestCase):
         patch.object(cleanup, "processes", return_value=[]).start()
         patch.object(cleanup, "builders_idle").start()
         patch.object(cleanup, "workspace_targets", return_value={}).start()
+        patch.object(cleanup, "merged_pull_requests", return_value=[]).start()
+        patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}).start()
         self.executed = []
         original = cleanup.execute
 
@@ -49,8 +54,42 @@ class CleanupTest(unittest.TestCase):
     def entry(self):
         return list(cleanup.worktrees(self.repo))[1]
 
-    def retire(self, dry=False):
-        cleanup.retire(self.repo, self.entry(), dry)
+    def retire(self, dry=False, archive=False):
+        cleanup.retire(self.repo, self.entry(), dry, archive)
+
+    def ignored(self, pattern, path, content="local"):
+        self.git(self.wt, "config", "core.excludesFile", str(self.root / "ignore"))
+        (self.root / "ignore").write_text(pattern + "\n")
+        target = self.wt / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        return target
+
+    def feature(self, base="main"):
+        initial = self.git(self.repo, "rev-parse", "HEAD").decode().strip()
+        self.git(
+            self.repo,
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/kixelated/test.git",
+        )
+        self.git(self.repo, "update-ref", f"refs/remotes/origin/{base}", initial)
+        self.git(self.wt, "checkout", "-qb", "feature", f"origin/{base}")
+        (self.wt / "source").write_text("feature")
+        self.git(self.wt, "commit", "-qam", "feature")
+        head = self.git(self.wt, "rev-parse", "HEAD").decode().strip()
+        # A squash has the same patch but different ancestry.
+        (self.repo / "source").write_text("feature")
+        self.git(self.repo, "commit", "-qam", "squash merge")
+        merge = self.git(self.repo, "rev-parse", "HEAD").decode().strip()
+        self.git(self.repo, "update-ref", f"refs/remotes/origin/{base}", merge)
+        return {
+            "headRefName": "feature",
+            "headRefOid": head,
+            "baseRefName": base,
+            "mergeCommit": {"oid": merge},
+        }
 
     def module(self):
         source = self.root / "module"
@@ -120,9 +159,11 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(self.executed, [])
 
     def test_active_path_with_metacharacters_preserved(self):
-        with patch.object(cleanup, "processes", return_value=[self.wt / "source"]):
-            with self.assertRaises(cleanup.Preserve):
-                self.retire()
+        with (
+            patch.object(cleanup, "processes", return_value=[self.wt / "source"]),
+            self.assertRaises(cleanup.Preserve),
+        ):
+            self.retire()
 
     def test_unique_detached_commit_preserved(self):
         self.git(self.wt, "commit", "-qm", "local", "--allow-empty")
@@ -151,9 +192,9 @@ class CleanupTest(unittest.TestCase):
                 cleanup, "workspace_targets", return_value={self.wt: [target]}
             ),
             patch.object(cleanup, "processes", return_value=[target / "binary"]),
+            self.assertRaises(cleanup.Preserve),
         ):
-            with self.assertRaises(cleanup.Preserve):
-                self.retire()
+            self.retire()
         self.assertEqual(self.executed, [])
 
     def test_unrelated_active_target_does_not_block_retirement(self):
@@ -163,20 +204,32 @@ class CleanupTest(unittest.TestCase):
             self.retire()
         self.assertFalse(self.wt.exists())
 
-    def test_failed_activity_inspection_preserves_checkout(self):
-        with patch.object(
-            cleanup, "processes", side_effect=cleanup.Preserve("inspection failed")
+    def test_activity_started_after_snapshot_preserves_worktree(self):
+        with (
+            patch.object(cleanup, "processes", return_value=[self.wt / "source"]),
+            self.assertRaises(cleanup.Preserve),
         ):
-            with self.assertRaises(cleanup.Preserve):
-                self.retire()
+            cleanup.retire(self.repo, self.entry(), False, activity=[])
+        self.assertEqual(self.executed, [])
+
+    def test_failed_activity_inspection_preserves_checkout(self):
+        with (
+            patch.object(
+                cleanup, "processes", side_effect=cleanup.Preserve("inspection failed")
+            ),
+            self.assertRaises(cleanup.Preserve),
+        ):
+            self.retire()
         self.assertEqual(self.executed, [])
 
     def test_cache_failure_stops_removal(self):
-        with patch.object(
-            cleanup, "execute", side_effect=subprocess.CalledProcessError(1, "mbx")
+        with (
+            patch.object(
+                cleanup, "execute", side_effect=subprocess.CalledProcessError(1, "mbx")
+            ),
+            self.assertRaises(subprocess.CalledProcessError),
         ):
-            with self.assertRaises(subprocess.CalledProcessError):
-                self.retire()
+            self.retire()
         self.assertTrue(self.wt.exists())
 
     def test_dry_run_keeps_worktree(self):
@@ -195,6 +248,273 @@ class CleanupTest(unittest.TestCase):
             any(command[:3] == ["mbx", "cache", "remove"] for command in self.executed)
         )
         self.assertFalse(any(command[0] == "git" for command in self.executed))
+
+    def test_squash_merge_with_inherited_upstream(self):
+        pr = self.feature()
+        self.assertFalse(cleanup.ancestor(self.repo, pr["headRefOid"], "origin/main"))
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            self.retire()
+        self.assertFalse(self.wt.exists())
+        self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/feature"))
+
+    def test_release_pr_uses_actual_base(self):
+        pr = self.feature("release")
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            self.retire()
+        self.assertFalse(self.wt.exists())
+
+    def test_commits_after_merge_preserved(self):
+        pr = self.feature()
+        self.git(self.wt, "commit", "-qm", "more work", "--allow-empty")
+        with (
+            patch.object(cleanup, "merged_pull_requests", return_value=[pr]),
+            self.assertRaisesRegex(cleanup.Preserve, "no verified completion"),
+        ):
+            self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_unmerged_or_closed_pr_preserved(self):
+        self.feature()
+        with self.assertRaisesRegex(cleanup.Preserve, "no verified completion"):
+            self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_merge_no_longer_on_base_preserved(self):
+        pr = self.feature()
+        parent = self.git(self.repo, "rev-parse", "HEAD^").decode().strip()
+        self.git(self.repo, "update-ref", "refs/remotes/origin/main", parent)
+        with (
+            patch.object(cleanup, "merged_pull_requests", return_value=[pr]),
+            self.assertRaises(cleanup.Preserve),
+        ):
+            self.retire()
+
+    def test_deleted_inherited_base_is_not_gone_feature(self):
+        self.feature()
+        self.git(self.repo, "update-ref", "-d", "refs/remotes/origin/main")
+        with self.assertRaises(cleanup.Preserve):
+            self.retire()
+
+    def test_unfetched_remote_cannot_prove_gone_branch(self):
+        self.feature()
+        self.git(
+            self.repo, "remote", "add", "fork", "https://github.com/kixelated/fork.git"
+        )
+        self.git(self.repo, "config", "branch.feature.remote", "fork")
+        self.git(self.repo, "config", "branch.feature.merge", "refs/heads/feature")
+        with self.assertRaises(cleanup.Preserve):
+            self.retire()
+
+    def test_pr_inspection_failure_preserves_checkout(self):
+        self.feature()
+        with (
+            patch.object(
+                cleanup,
+                "merged_pull_requests",
+                side_effect=cleanup.Preserve("API failed"),
+            ),
+            self.assertRaises(cleanup.Preserve),
+        ):
+            self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_local_data_archived_and_verified_before_removal(self):
+        source = self.ignored("doc/draft/", "doc/draft/idea.md", "irreplaceable draft")
+        source.chmod(0o600)
+        expected = cleanup.fingerprint(source)
+        self.retire(archive=True)
+        self.assertFalse(self.wt.exists())
+        archives = list((self.root / "state/worktree-clean/archives").iterdir())
+        self.assertEqual(len(archives), 1)
+        manifest = json.loads((archives[0] / "manifest.json").read_text())
+        self.assertEqual(manifest["worktree"], str(self.wt))
+        self.assertEqual(manifest["files"]["doc/draft/idea.md"], expected)
+        self.assertEqual(
+            cleanup.fingerprint(archives[0] / "files/doc/draft/idea.md"), expected
+        )
+
+    def test_ignored_submodule_data_archived(self):
+        module = self.module()
+        (self.root / "ignore").write_text(".env\n")
+        self.git(module, "config", "core.excludesFile", str(self.root / "ignore"))
+        (module / ".env").write_text("submodule state")
+        self.retire(archive=True)
+        backups = list(
+            (self.root / "state/worktree-clean/archives").glob("*/files/moq/.env")
+        )
+        self.assertEqual(backups[0].read_text(), "submodule state")
+
+    def test_archive_symlink_preserves_link_without_following(self):
+        link = self.ignored(".env", ".env")
+        link.unlink()
+        link.symlink_to("/not/a/real/secret")
+        self.retire(archive=True)
+        backup = next(
+            (self.root / "state/worktree-clean/archives").glob("*/files/.env")
+        )
+        self.assertEqual(os.readlink(backup), "/not/a/real/secret")
+
+    def test_archive_copy_failure_keeps_original(self):
+        source = self.ignored(".env", ".env")
+        with (
+            patch.object(cleanup.shutil, "copy2", side_effect=OSError("disk full")),
+            self.assertRaises(OSError),
+        ):
+            self.retire(archive=True)
+        self.assertEqual(source.read_text(), "local")
+        self.assertFalse(any(command[0] == "git" for command in self.executed))
+
+    def test_archive_corruption_keeps_original(self):
+        source = self.ignored(".env", ".env")
+
+        def corrupt(source, target, **kwargs):
+            target.write_text("corrupt")
+
+        with (
+            patch.object(cleanup.shutil, "copy2", side_effect=corrupt),
+            self.assertRaisesRegex(cleanup.Preserve, "verification failed"),
+        ):
+            self.retire(archive=True)
+        self.assertEqual(source.read_text(), "local")
+
+    def test_source_change_after_archive_keeps_worktree(self):
+        source = self.ignored(".env", ".env")
+        original = cleanup.archive_local_data
+
+        def archive(*args):
+            saved = original(*args)
+            source.write_text("new local work")
+            return saved
+
+        with (
+            patch.object(cleanup, "archive_local_data", side_effect=archive),
+            self.assertRaisesRegex(cleanup.Preserve, "changed during archive"),
+        ):
+            self.retire(archive=True)
+        self.assertEqual(source.read_text(), "new local work")
+
+    def test_archive_dry_run_does_not_write_backups(self):
+        self.ignored(".env", ".env")
+        self.retire(dry=True, archive=True)
+        self.assertTrue(self.wt.exists())
+        self.assertFalse((self.root / "state").exists())
+
+    def test_independent_nested_repository_inside_artifact_preserved(self):
+        source = self.ignored("target/", "target/nested/notes", "local work")
+        self.git(source.parent, "init", "-q")
+        with self.assertRaisesRegex(cleanup.Preserve, "nested Git repository"):
+            self.retire(archive=True)
+        self.assertEqual(source.read_text(), "local work")
+        self.assertEqual(self.executed, [])
+
+    def test_archive_mode_still_protects_submodule_local_history(self):
+        module = self.module()
+        self.git(module, "config", "user.name", "Test")
+        self.git(module, "config", "user.email", "test@example.com")
+        old = self.git(module, "rev-parse", "HEAD").decode().strip()
+        self.git(module, "commit", "-qm", "local", "--allow-empty")
+        self.git(module, "branch", "local-work")
+        self.git(module, "checkout", "-q", "--detach", old)
+        with self.assertRaisesRegex(cleanup.Preserve, "local-only"):
+            self.retire(archive=True)
+
+
+class PullRequestEvidenceTest(unittest.TestCase):
+    def setUp(self):
+        cleanup.pull_request_evidence.cache_clear()
+        self.addCleanup(cleanup.pull_request_evidence.cache_clear)
+
+    def test_paginated_exact_head_evidence(self):
+        prs = [
+            {"headRefName": "first", "headRefOid": "a" * 40},
+            {"headRefName": "last", "headRefOid": "b" * 40},
+        ]
+        pages = [
+            {"data": {"repository": {"pullRequests": {"nodes": [pr]}}}} for pr in prs
+        ]
+        result = subprocess.CompletedProcess([], 0, json.dumps(pages), "")
+        with (
+            patch.object(
+                cleanup, "text", return_value="git@github.com:kixelated/test.git"
+            ),
+            patch.object(cleanup.subprocess, "run", return_value=result) as run,
+        ):
+            self.assertEqual(cleanup.merged_pull_requests(Path("repo")), prs)
+            self.assertEqual(cleanup.merged_pull_requests(Path("repo")), prs)
+        run.assert_called_once()
+        self.assertIn("--paginate", run.call_args.args[0])
+
+    def test_api_failure_cached_and_protected(self):
+        result = subprocess.CompletedProcess([], 1, "", "authentication failed")
+        with (
+            patch.object(
+                cleanup, "text", return_value="https://github.com/kixelated/test"
+            ),
+            patch.object(cleanup.subprocess, "run", return_value=result) as run,
+        ):
+            for _ in range(2):
+                with self.assertRaisesRegex(cleanup.Preserve, "authentication failed"):
+                    cleanup.merged_pull_requests(Path("repo"))
+        run.assert_called_once()
+
+    def test_malformed_api_response_protected(self):
+        result = subprocess.CompletedProcess([], 0, '[{"errors": ["denied"]}]', "")
+        with (
+            patch.object(
+                cleanup, "text", return_value="https://github.com/kixelated/test"
+            ),
+            patch.object(cleanup.subprocess, "run", return_value=result),
+            self.assertRaisesRegex(cleanup.Preserve, "invalid merged"),
+        ):
+            cleanup.merged_pull_requests(Path("repo"))
+
+
+@unittest.skipUnless(
+    sys.platform.startswith("linux"), "systemd installer is Linux-only"
+)
+class InstallTest(unittest.TestCase):
+    def test_full_install_enables_timer_and_is_repeatable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = root / "commands"
+            commands.mkdir()
+            log = root / "commands.log"
+            for command in ("mise", "git", "systemctl"):
+                script = commands / command
+                script.write_text(
+                    f'#!/bin/sh\nprintf \'%s\\n\' "{command} $*" >> "$INSTALL_LOG"\n'
+                )
+                script.chmod(0o755)
+            env = {
+                **os.environ,
+                "HOME": str(root / "home"),
+                "XDG_CONFIG_HOME": str(root / "config"),
+                "PATH": f"{commands}:/usr/bin:/bin",
+                "INSTALL_LOG": str(log),
+            }
+            Path(env["HOME"]).mkdir()
+            repo = Path(__file__).resolve().parents[1]
+            for _ in range(2):
+                subprocess.run(
+                    ["bash", str(repo / "install")],
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                )
+            units = Path(env["XDG_CONFIG_HOME"]) / "systemd/user"
+            self.assertEqual(
+                (units / "worktree-clean.timer").resolve(),
+                repo / "systemd/worktree-clean.timer",
+            )
+            self.assertEqual(
+                (Path(env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
+                repo / "bin/clean-worktrees.py",
+            )
+            calls = log.read_text().splitlines()
+            self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
+            self.assertEqual(
+                calls.count("systemctl --user enable --now worktree-clean.timer"), 2
+            )
 
 
 if __name__ == "__main__":
