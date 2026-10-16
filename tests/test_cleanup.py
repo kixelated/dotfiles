@@ -118,6 +118,21 @@ class CleanupTest(unittest.TestCase):
         self.assertFalse(self.wt.exists())
         self.assertNotIn("--force", self.executed[-1])
 
+    def test_linked_only_discovery_keeps_stable_repository_handle(self):
+        search = self.root / "search"
+        search.mkdir()
+        first = search / "first"
+        second = search / "second"
+        self.git(self.repo, "worktree", "move", str(self.wt), str(first))
+        self.git(self.repo, "worktree", "add", "-q", "--detach", str(second))
+        handles = list(cleanup.repositories([search]))
+        self.assertEqual(handles, [self.repo / ".git"])
+        for entry in list(cleanup.worktrees(handles[0]))[1:]:
+            cleanup.retire(handles[0], entry, False)
+        self.assertFalse(first.exists())
+        self.assertFalse(second.exists())
+        self.assertEqual(len(list(cleanup.worktrees(handles[0]))), 1)
+
     def test_clean_submodule_single_force(self):
         self.module()
         self.retire()

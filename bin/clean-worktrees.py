@@ -490,7 +490,9 @@ def repositories(roots):
                     continue
                 if common not in seen:
                     seen.add(common)
-                    yield path
+                    # Discovery may start inside a removable linked checkout.
+                    # Its shared gitdir survives every linked-tree retirement.
+                    yield Path(common)
                 dirs.clear()
             elif len(path.relative_to(root).parts) >= 4:
                 dirs.clear()
