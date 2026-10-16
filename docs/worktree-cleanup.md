@@ -12,6 +12,9 @@ systemctl --user status worktree-clean.timer
 journalctl --user -u worktree-clean.service
 ```
 
+On hosts without a reachable systemd user manager (for example, containers),
+dotfiles installation skips the timer and continues configuring the other files.
+
 The cleaner keeps main checkouts, locks, dirty/untracked files, hidden index
 changes, active processes and targets, submodule stashes, and local-only
 submodule commits. Missing or failed inspection preserves the checkout.

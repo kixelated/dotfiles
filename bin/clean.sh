@@ -122,18 +122,6 @@ active_cwds >"$CWDS"
 
 START_FREE=$(free_kib)
 
-# Repositories: a .git at or just below each root. -print -prune keeps find out
-# of the object store and out of nested worktrees, which git enumerates anyway.
-: >"$REPOS"
-for root in "${ROOTS[@]}"; do
-	[ -d "$root" ] || continue
-	# Unreadable siblings (systemd-private-* under /tmp) make find exit 1,
-	# which pipefail would turn into a silent abort of the whole script.
-	{ find "$root" -maxdepth 3 -name .git -print -prune 2>/dev/null || true; } |
-		sed 's#/\.git$##' >>"$REPOS"
-done
-sort -u -o "$REPOS" "$REPOS"
-
 echo
 echo "== worktrees"
 script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -145,6 +133,16 @@ for root in "${ROOTS[@]}"; do args+=(--root "$root"); done
 python3 "$script_dir/clean-worktrees.py" "${args[@]}"
 
 if [ "$DO_TARGETS" = 1 ]; then
+	# Only the optional Cargo sweep uses this inventory. Normal retirement
+	# discovers repositories in Python and enumerates their registered worktrees.
+	: >"$REPOS"
+	for root in "${ROOTS[@]}"; do
+		[ -d "$root" ] || continue
+		# Ignore unreadable siblings (systemd-private-* under /tmp).
+		{ find "$root" -maxdepth 3 -name .git -print -prune 2>/dev/null || true; } |
+			sed 's#/\.git$##' >>"$REPOS"
+	done
+	sort -u -o "$REPOS" "$REPOS"
 	echo
 	echo "== build output (cargo clean)"
 	# A retained checkout's target/ is reproducible, so it can go even when the

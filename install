@@ -41,7 +41,11 @@ mise exec -- mbx setup --global --status
 
 # The timer runs as this user, using the same checkout as the linked commands.
 if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null; then
-	"$DIR/bin/install-worktree-clean.sh"
+	if systemctl --user show-environment >/dev/null 2>&1; then
+		"$DIR/bin/install-worktree-clean.sh"
+	else
+		echo "Skipping worktree timer: no running systemd user manager"
+	fi
 fi
 
 # ~/.agents/skills is Codex's user-level skills dir; ~/.codex/skills is

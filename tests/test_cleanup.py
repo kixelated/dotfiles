@@ -473,48 +473,106 @@ class PullRequestEvidenceTest(unittest.TestCase):
     sys.platform.startswith("linux"), "systemd installer is Linux-only"
 )
 class InstallTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.commands = self.root / "commands"
+        self.commands.mkdir()
+        self.log = self.root / "commands.log"
+        for command in ("mise", "git", "systemctl"):
+            script = self.commands / command
+            script.write_text(
+                f'#!/bin/sh\nprintf \'%s\\n\' "{command} $*" >> "$INSTALL_LOG"\n'
+            )
+            script.chmod(0o755)
+        self.env = {
+            **os.environ,
+            "HOME": str(self.root / "home"),
+            "XDG_CONFIG_HOME": str(self.root / "config"),
+            "PATH": f"{self.commands}:/usr/bin:/bin",
+            "INSTALL_LOG": str(self.log),
+        }
+        Path(self.env["HOME"]).mkdir()
+        self.repo = Path(__file__).resolve().parents[1]
+
+    def install(self):
+        return subprocess.run(
+            ["bash", str(self.repo / "install")],
+            env=self.env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
     def test_full_install_enables_timer_and_is_repeatable(self):
+        for _ in range(2):
+            self.install()
+        units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        self.assertEqual(
+            (units / "worktree-clean.timer").resolve(),
+            self.repo / "systemd/worktree-clean.timer",
+        )
+        self.assertEqual(
+            (Path(self.env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
+            self.repo / "bin/clean-worktrees.py",
+        )
+        calls = self.log.read_text().splitlines()
+        self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
+        self.assertEqual(
+            calls.count("systemctl --user enable --now worktree-clean.timer"), 2
+        )
+
+    def test_no_user_manager_skips_timer_and_finishes_install(self):
+        (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")
+        result = self.install()
+        self.assertIn("Skipping worktree timer", result.stdout)
+        self.assertFalse((Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user").exists())
+        self.assertTrue((Path(self.env["HOME"]) / ".codex/bash-env.sh").is_symlink())
+        self.assertIn("git submodule update --init --remote", self.log.read_text())
+
+
+class ShellDispatchTest(unittest.TestCase):
+    def test_normal_run_avoids_cargo_repository_scan(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             commands = root / "commands"
             commands.mkdir()
-            log = root / "commands.log"
-            for command in ("mise", "git", "systemctl"):
-                script = commands / command
-                script.write_text(
-                    f'#!/bin/sh\nprintf \'%s\\n\' "{command} $*" >> "$INSTALL_LOG"\n'
-                )
-                script.chmod(0o755)
+            log = root / "calls"
+            stubs = {
+                "lsof": "printf 'n/unused\\n'",
+                "find": 'printf "find\\n" >> "$DISPATCH_LOG"',
+                "python3": 'printf "%s\\n" "$*" >> "$DISPATCH_LOG"',
+            }
+            for name, body in stubs.items():
+                path = commands / name
+                path.write_text("#!/bin/sh\n" + body + "\n")
+                path.chmod(0o755)
             env = {
                 **os.environ,
-                "HOME": str(root / "home"),
-                "XDG_CONFIG_HOME": str(root / "config"),
                 "PATH": f"{commands}:/usr/bin:/bin",
-                "INSTALL_LOG": str(log),
+                "DISPATCH_LOG": str(log),
             }
-            Path(env["HOME"]).mkdir()
-            repo = Path(__file__).resolve().parents[1]
-            for _ in range(2):
+            script = Path(__file__).resolve().parents[1] / "bin/clean.sh"
+            for flags in ([], ["--targets"]):
                 subprocess.run(
-                    ["bash", str(repo / "install")],
+                    [
+                        "bash",
+                        str(script),
+                        "--dry-run",
+                        "--archive-local-data",
+                        "--root",
+                        str(root),
+                        *flags,
+                    ],
                     env=env,
                     check=True,
                     capture_output=True,
                 )
-            units = Path(env["XDG_CONFIG_HOME"]) / "systemd/user"
-            self.assertEqual(
-                (units / "worktree-clean.timer").resolve(),
-                repo / "systemd/worktree-clean.timer",
-            )
-            self.assertEqual(
-                (Path(env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
-                repo / "bin/clean-worktrees.py",
-            )
-            calls = log.read_text().splitlines()
-            self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
-            self.assertEqual(
-                calls.count("systemctl --user enable --now worktree-clean.timer"), 2
-            )
+                calls = log.read_text().splitlines()
+                self.assertEqual("find" in calls, bool(flags))
+                self.assertIn("--archive-local-data", calls[0])
+                log.write_text("")
 
 
 if __name__ == "__main__":
