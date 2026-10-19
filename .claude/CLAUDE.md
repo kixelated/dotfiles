@@ -2,6 +2,7 @@
 
 - When a step doesn't need my input, keep going. Put status notes in the same message as your next action.
 - Stop and ask only when intent or a consequential choice is unclear, or before anything destructive. Brainstorm options and use an interactive prompt with a recommendation.
+- Make references clickable: link issues, PRs, and commits by full URL (`[owner/repo#123](https://github.com/owner/repo/pull/123)`), never a bare `#123`.
 - Prioritize refactoring for long-term code maintainability.
 - Pro-actively do any background research and explore the state-of-the-art.
 - If an instruction in this file is ambiguous, or you had to guess which reading was meant, surface it and propose clearer wording instead of silently picking one.
