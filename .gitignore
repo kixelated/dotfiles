@@ -1,3 +1,5 @@
 __pycache__/
 # mbx locks its config beside the resolved file, which is the tracked one.
 mbx/.config.toml.lock
+# Claude Code syncs claude.ai skills here through the ~/.claude/skills link.
+.claude/skills/synced/
