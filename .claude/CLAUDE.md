@@ -31,5 +31,5 @@
 # Development
 
 - Default to worktrees, except `~/work/dotfiles`: it is live config, so edit in place.
-- Focus on simplification.
+- Prefer the net simpler result: reuse what exists, or narrow the scope, when that makes the implementation or API simpler overall.
 - Don't set arbitrary acceptance criteria.
