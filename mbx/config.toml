@@ -1,0 +1,17 @@
+# Share unchanged workspace crates across worktrees. Panic/debug paths show a
+# placeholder instead of the checkout path.
+share_workspace_root = true
+
+# No blanket incremental compilation: its state is per-checkout, can't be shared,
+# and rewrites hundreds of MB per build across parallel agent worktrees.
+incremental = false
+# Except the crates being edited: a crate that keeps missing the cache with new
+# content compiles incrementally, outside the shared cache. A public-API edit to
+# moq-net re-checked the moq workspace in ~23s this way versus ~40-50s without.
+learned_incremental = true
+
+[scheduler]
+# Leave cores for the desktop and dev stacks; parallel agent builds otherwise
+# take all 32.
+reserve_cpus = 6
+priority = "low"
