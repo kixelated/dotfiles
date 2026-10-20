@@ -47,12 +47,12 @@ mise install mr-boxington
 mise exec -- mbx setup --global
 mise exec -- mbx setup --global --status
 
-# The timer runs as this user, using the same checkout as the linked commands.
+# Install the manual cleanup service and retire any old automatic timer.
 if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null; then
 	if systemctl --user show-environment >/dev/null 2>&1; then
 		"$DIR/bin/install-worktree-clean.sh"
 	else
-		echo "Skipping worktree timer: no running systemd user manager"
+		echo "Skipping worktree cleanup service: no running systemd user manager"
 	fi
 fi
 

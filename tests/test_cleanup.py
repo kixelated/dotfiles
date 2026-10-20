@@ -520,28 +520,38 @@ class InstallTest(unittest.TestCase):
             text=True,
         )
 
-    def test_full_install_enables_timer_and_is_repeatable(self):
+    def test_full_install_keeps_cleanup_manual_and_is_repeatable(self):
         for _ in range(2):
             self.install()
         units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
         self.assertEqual(
-            (units / "worktree-clean.timer").resolve(),
-            self.repo / "systemd/worktree-clean.timer",
+            (units / "worktree-clean.service").resolve(),
+            self.repo / "systemd/worktree-clean.service",
         )
+        self.assertFalse((units / "worktree-clean.timer").exists())
         self.assertEqual(
             (Path(self.env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
             self.repo / "bin/clean-worktrees.py",
         )
         calls = self.log.read_text().splitlines()
         self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
-        self.assertEqual(
-            calls.count("systemctl --user enable --now worktree-clean.timer"), 2
-        )
+        self.assertFalse(any("enable --now" in call for call in calls))
 
-    def test_no_user_manager_skips_timer_and_finishes_install(self):
+    def test_install_removes_dangling_legacy_timer(self):
+        units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        (units / "timers.target.wants").mkdir(parents=True)
+        missing = self.repo / "systemd/worktree-clean.timer"
+        (units / "worktree-clean.timer").symlink_to(missing)
+        (units / "timers.target.wants/worktree-clean.timer").symlink_to(missing)
+        self.install()
+        self.assertFalse((units / "worktree-clean.timer").is_symlink())
+        self.assertFalse((units / "timers.target.wants/worktree-clean.timer").is_symlink())
+        self.assertIn("systemctl --user stop worktree-clean.timer", self.log.read_text())
+
+    def test_no_user_manager_skips_service_and_finishes_install(self):
         (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")
         result = self.install()
-        self.assertIn("Skipping worktree timer", result.stdout)
+        self.assertIn("Skipping worktree cleanup service", result.stdout)
         self.assertFalse((Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user").exists())
         self.assertTrue((Path(self.env["HOME"]) / ".codex/bash-env.sh").is_symlink())
         self.assertIn("git submodule update --init --remote", self.log.read_text())
