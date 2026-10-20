@@ -537,6 +537,17 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
         self.assertFalse(any("enable --now" in call for call in calls))
 
+    def test_install_removes_dangling_legacy_timer(self):
+        units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
+        (units / "timers.target.wants").mkdir(parents=True)
+        missing = self.repo / "systemd/worktree-clean.timer"
+        (units / "worktree-clean.timer").symlink_to(missing)
+        (units / "timers.target.wants/worktree-clean.timer").symlink_to(missing)
+        self.install()
+        self.assertFalse((units / "worktree-clean.timer").is_symlink())
+        self.assertFalse((units / "timers.target.wants/worktree-clean.timer").is_symlink())
+        self.assertIn("systemctl --user stop worktree-clean.timer", self.log.read_text())
+
     def test_no_user_manager_skips_service_and_finishes_install(self):
         (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")
         result = self.install()
