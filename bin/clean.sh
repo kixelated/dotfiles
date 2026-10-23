@@ -12,14 +12,14 @@ usage: clean.sh [options]
 Removes stale git worktrees, then optionally reclaims build output and the Nix
 store. A worktree is removed only when it is registered, unlocked, not the main
 checkout, clean including untracked files, has no process running inside it, and
-either its branch is merged into the base, its exact HEAD has a verified merged
+either its branch is merged into the base, its HEAD belongs to the history of a verified merged
 PR, or its own branch upstream is gone (detached
 HEADs additionally need their commit reachable from some surviving ref).
 
 options:
   -n, --dry-run   report what would happen and change nothing
       --gc        also collect MBX storage with a 25GiB object budget
-      --archive-local-data  back up ignored local files before retiring a checkout
+      --archive-local-data  back up ignored local files before retirement (default)
       --targets   also run `cargo clean` on build output in retained checkouts
       --nix       also run `nix store gc` (skipped when a Nix session is live)
       --all       --targets --nix
@@ -32,7 +32,7 @@ DRY_RUN=0
 DO_TARGETS=0
 DO_NIX=0
 DO_GC=0
-ARCHIVE_LOCAL_DATA=0
+ARCHIVE_LOCAL_DATA=1
 ROOTS=()
 
 while [ $# -gt 0 ]; do
