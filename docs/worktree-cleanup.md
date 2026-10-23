@@ -43,7 +43,8 @@ default: ignored drafts, old package configs, and other local files are copied i
 removes the checkout. Copies preserve symlinks, permissions, and timestamps;
 content hashes and metadata are verified, files/directories are synced, and
 changes during backup preserve the original. Backups are never automatically
-purged. A failed backup leaves the original intact (and may leave a partial
+purged. A `target/` directory without a valid Cargo `CACHEDIR.TAG` is archived
+as local data, since older checkouts can contain drafts and scripts there. A failed backup leaves the original intact (and may leave a partial
 backup).
 
 Each completed backup has a `manifest.json` with the original checkout path,

@@ -128,12 +128,23 @@ def local_data(repo):
     """Inspect ignored roots once, including nested repos inside build output."""
     found = []
 
+    @cache
+    def cargo_cache(parts):
+        marker = repo.joinpath(*parts, "CACHEDIR.TAG")
+        try:
+            return marker.read_bytes().startswith(
+                b"Signature: 8a477f597d28d172789f06886806bc55"
+            )
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
     def artifact(path):
-        return (
-            bool(set(path.parts[:-1]) & ARTIFACTS)
-            or path.name in ARTIFACTS
-            or path.suffix == ".tsbuildinfo"
-        )
+        for index, part in enumerate(path.parts):
+            if part in ARTIFACTS:
+                # Match Cargo's refusal to delete an unmarked target. Older
+                # agent checkouts contain drafts and helper scripts there.
+                return part != "target" or cargo_cache(path.parts[:index + 1])
+        return path.suffix == ".tsbuildinfo"
 
     def record(path):
         if not artifact(path.relative_to(repo)):

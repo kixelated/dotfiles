@@ -471,6 +471,23 @@ class CleanupTest(unittest.TestCase):
         self.assertTrue((backup / "linked-directory").is_symlink())
         self.assertEqual((outside / "secret").read_text(), "never traverse")
 
+    def test_unmarked_target_local_files_are_archived(self):
+        self.ignored("target/", "target/review.md", "valuable review notes")
+        (self.wt / "target/debug").mkdir()
+        (self.wt / "target/debug/object").write_text("unknown build state")
+        self.retire(archive=True)
+        backup = next((self.root / "state/worktree-clean/archives").glob("*/files/target"))
+        self.assertEqual((backup / "review.md").read_text(), "valuable review notes")
+        self.assertEqual((backup / "debug/object").read_text(), "unknown build state")
+
+    def test_marked_cargo_target_is_reproducible(self):
+        self.ignored("target/", "target/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n")
+        (self.wt / "target/debug").mkdir()
+        (self.wt / "target/debug/object").write_text("compiled output")
+        self.retire(archive=True)
+        self.assertFalse(self.wt.exists())
+        self.assertFalse((self.root / "state").exists())
+
     def test_bare_repository_inside_ignored_artifacts_preserved(self):
         self.ignored("target/", "target/cache/notes", "local")
         self.git(self.wt, "init", "--bare", "target/cache/history.git")
