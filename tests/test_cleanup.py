@@ -272,6 +272,42 @@ class CleanupTest(unittest.TestCase):
         self.assertFalse(self.wt.exists())
         self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/feature"))
 
+    def test_renamed_local_branch_uses_merged_commit(self):
+        pr = self.feature()
+        self.git(self.wt, "branch", "-m", "local-review-alias")
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            self.retire()
+        self.assertFalse(self.wt.exists())
+        self.assertEqual(self.git(self.repo, "rev-parse", "local-review-alias").decode().strip(), pr["headRefOid"])
+
+    def test_earlier_iteration_of_merged_pr_is_complete(self):
+        pr = self.feature()
+        earlier = pr["headRefOid"]
+        self.git(self.wt, "commit", "-qm", "review follow-up", "--allow-empty")
+        pr["headRefOid"] = self.git(self.wt, "rev-parse", "HEAD").decode().strip()
+        self.git(self.wt, "reset", "--hard", earlier)
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            self.retire()
+        self.assertFalse(self.wt.exists())
+
+    def test_missing_pr_head_object_provides_no_completion(self):
+        pr = self.feature()
+        pr["headRefOid"] = "f" * 40
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            with self.assertRaisesRegex(cleanup.Preserve, "no verified completion"):
+                self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_base_rewrite_invalidates_cached_pr_proof(self):
+        pr = self.feature()
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            cleanup.eligible(self.repo, self.entry())
+            parent = self.git(self.repo, "rev-parse", "HEAD^").decode().strip()
+            self.git(self.repo, "update-ref", "refs/remotes/origin/main", parent)
+            with self.assertRaisesRegex(cleanup.Preserve, "no verified completion"):
+                self.retire()
+        self.assertEqual(self.executed, [])
+
     def test_release_pr_uses_actual_base(self):
         pr = self.feature("release")
         with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
@@ -420,6 +456,26 @@ class CleanupTest(unittest.TestCase):
         with self.assertRaisesRegex(cleanup.Preserve, "nested Git repository"):
             self.retire(archive=True)
         self.assertEqual(source.read_text(), "local work")
+        self.assertEqual(self.executed, [])
+
+    def test_ignored_tree_archives_files_and_directory_symlinks(self):
+        self.ignored(".scratch/", ".scratch/nested/notes.md", "keep this draft")
+        link = self.wt / ".scratch/linked-directory"
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "secret").write_text("never traverse")
+        link.symlink_to(outside, target_is_directory=True)
+        self.retire(archive=True)
+        backup = next((self.root / "state/worktree-clean/archives").glob("*/files/.scratch"))
+        self.assertEqual((backup / "nested/notes.md").read_text(), "keep this draft")
+        self.assertTrue((backup / "linked-directory").is_symlink())
+        self.assertEqual((outside / "secret").read_text(), "never traverse")
+
+    def test_bare_repository_inside_ignored_artifacts_preserved(self):
+        self.ignored("target/", "target/cache/notes", "local")
+        self.git(self.wt, "init", "--bare", "target/cache/history.git")
+        with self.assertRaisesRegex(cleanup.Preserve, "nested Git repository"):
+            self.retire(archive=True)
         self.assertEqual(self.executed, [])
 
     def test_archive_mode_still_protects_submodule_local_history(self):
@@ -585,7 +641,6 @@ class ShellDispatchTest(unittest.TestCase):
                         "bash",
                         str(script),
                         "--dry-run",
-                        "--archive-local-data",
                         "--root",
                         str(root),
                         *flags,

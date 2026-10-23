@@ -18,8 +18,10 @@
 # Loops
 
 - Back out when minimal progress is being made, rather than burn tokens.
-- Before pausing for a blocking decision or handing off work, commit a checkpoint of meaningful source changes. Record what remains unresolved and which checks passed or were not run.
+- Before ending a coding task, pausing for a blocking decision, or handing off work, commit a checkpoint of meaningful source changes. Record what remains unresolved and which checks passed or were not run.
 - Keep disposable scratch out of checkpoints and remove it before handoff. Preserve source changes and local-only submodule commits before releasing a worktree.
+- Put PR bodies, review drafts, logs, inspection patches, helper scripts, and temporary clones in a per-task directory outside the checkout, such as `mktemp -d`. Do not leave `.scratch/`, `.external/`, `.pr-*.md`, or nested helper repositories in a checkout, or add ignore rules just to hide them.
+- Finish with the intended source changes committed and a clean checkout. Restore only incidental generated changes from your own commands; preserve pre-existing and unrelated changes. Push completed work and track the actual PR branch so cleanup can verify completion.
 - Wait on background work with a blocking command that ends on its terminal state, not short timed polls. Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout. Stay silent on notifications that change nothing.
 - Sub-agents end their turn only with a final result or a question, never with background work still running.
 

@@ -125,41 +125,65 @@ def clean(repo):
 
 
 def local_data(repo):
-    """Find ignored data, rejecting nested repositories even inside artifacts."""
-    inspected = set()
+    """Inspect ignored roots once, including nested repos inside build output."""
     found = []
+
+    def artifact(path):
+        return (
+            bool(set(path.parts[:-1]) & ARTIFACTS)
+            or path.name in ARTIFACTS
+            or path.suffix == ".tsbuildinfo"
+        )
+
+    def record(path):
+        if not artifact(path.relative_to(repo)):
+            found.append(path)
+
     for raw in git(
-        repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"
+        repo, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"
     ).split(b"\0"):
-        if raw:
-            path = Path(os.fsdecode(raw))
-            full = repo / path
-            if path.is_absolute() or ".." in path.parts:
-                raise Preserve(f"ignored path escapes checkout: {path}")
-            for parent in (full, *full.parents):
-                if parent == repo:
-                    break
-                if parent in inspected:
-                    break
-                inspected.add(parent)
-                if (
-                    parent.name == ".git"
-                    or (parent / ".git").exists()
-                    or (parent / ".git").is_symlink()
-                    or ((parent / "HEAD").is_file() and (parent / "objects").is_dir())
-                ):
-                    raise Preserve(f"independent nested Git repository: {parent}")
-                if parent != full and parent.is_symlink():
-                    raise Preserve(f"ignored path traverses a symlink: {full}")
-            if full.is_dir() and not full.is_symlink():
-                raise Preserve(f"opaque ignored directory: {full}")
-            if not (
-                set(path.parts[:-1]) & ARTIFACTS
-                or path.name in ARTIFACTS
-                or path.suffix == ".tsbuildinfo"
+        if not raw:
+            continue
+        path = Path(os.fsdecode(raw))
+        full = repo / path
+        if path.is_absolute() or ".." in path.parts:
+            raise Preserve(f"ignored path escapes checkout: {path}")
+        for parent in (full, *full.parents):
+            if parent == repo:
+                break
+            if (
+                parent.name == ".git"
+                or (parent / ".git").exists()
+                or (parent / ".git").is_symlink()
+                or ((parent / "HEAD").is_file() and (parent / "objects").is_dir())
             ):
-                found.append(full)
-    return found
+                raise Preserve(f"independent nested Git repository: {parent}")
+            if parent != full and parent.is_symlink():
+                raise Preserve(f"ignored path traverses a symlink: {full}")
+        if not full.is_dir() or full.is_symlink():
+            record(full)
+            continue
+
+        def failed(error):
+            raise error
+
+        # Git collapses ignored directories; walk them once without following
+        # links. Inspect directory entries for Git repositories, not every
+        # artifact file's ancestors (which made dependency trees very costly).
+        for directory, dirs, files in os.walk(full, followlinks=False, onerror=failed):
+            root = Path(directory)
+            if ".git" in dirs or ".git" in files or ("HEAD" in files and "objects" in dirs):
+                raise Preserve(f"independent nested Git repository: {root}")
+            if artifact(root.relative_to(repo)):
+                continue
+            for name in list(dirs):
+                child = root / name
+                if child.is_symlink():
+                    dirs.remove(name)
+                    record(child)
+            for name in files:
+                record(root / name)
+    return sorted(found)
 
 
 def fingerprint(path):
@@ -301,6 +325,69 @@ def merged_pull_requests(repo):
     return evidence
 
 
+def completed_pr_commits(repo):
+    """Use commit identity, including earlier iterations, rather than branch names."""
+    prs = merged_pull_requests(repo)
+    refs = sorted(
+        {
+            f"refs/remotes/origin/{pr['baseRefName']}"
+            for pr in prs
+            if isinstance(pr.get("baseRefName"), str) and pr["baseRefName"]
+        }
+    )
+    if not refs:
+        return frozenset()
+    # Key the cache by current base tips: a force-push must invalidate old proof.
+    bases = tuple(
+        text(repo, "for-each-ref", "--format=%(refname) %(objectname)", *refs).splitlines()
+    )
+    return completed_pr_commits_at_bases(repo, bases)
+
+
+@cache
+def completed_pr_commits_at_bases(repo, bases):
+    reachable = {
+        ref: set(text(repo, "rev-list", tip).splitlines())
+        for ref, tip in (line.split() for line in bases)
+    }
+    heads = set()
+    for pr in merged_pull_requests(repo):
+        head = pr.get("headRefOid")
+        merge = pr.get("mergeCommit") or {}
+        base = f"refs/remotes/origin/{pr.get('baseRefName', '')}"
+        if (
+            isinstance(head, str)
+            and re.fullmatch(r"[0-9a-f]{40,64}", head)
+            and isinstance(merge, dict)
+            and isinstance(merge.get("oid"), str)
+            and merge["oid"] in reachable.get(base, set())
+        ):
+            heads.add(head)
+    if not heads:
+        return frozenset()
+    # Deleted PR branches need not exist locally. Only walk available commits;
+    # missing objects provide no proof and never trigger one fetch per PR.
+    objects = subprocess.check_output(
+        [
+            "git", "-C", str(repo), "cat-file",
+            "--batch-check=%(objectname) %(objecttype)",
+        ],
+        input="".join(head + "\n" for head in sorted(heads)).encode(),
+        stderr=subprocess.PIPE,
+    )
+    available = [
+        line.split()[0] for line in objects.splitlines() if line.endswith(b" commit")
+    ]
+    if not available:
+        return frozenset()
+    commits = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-list", "--stdin"],
+        input=b"\n".join(available) + b"\n",
+        stderr=subprocess.PIPE,
+    )
+    return frozenset(os.fsdecode(commits).splitlines())
+
+
 def completed_branch(repo, entry, head):
     for ref in (
         "refs/remotes/origin/HEAD",
@@ -324,21 +411,13 @@ def completed_branch(repo, entry, head):
         and not text(repo, "for-each-ref", "--format=%(refname)", upstream)
     ):
         return
-    # Exact head avoids retiring work added after a PR merged. The merge commit
-    # must also survive on the PR's actual base (which can be release, not main).
-    if "origin" in text(repo, "remote").splitlines():
-        for pr in merged_pull_requests(repo):
-            if pr.get("headRefName") != branch or pr.get("headRefOid") != head:
-                continue
-            merge = pr.get("mergeCommit") or {}
-            base = f"refs/remotes/origin/{pr.get('baseRefName', '')}"
-            if (
-                isinstance(merge, dict)
-                and re.fullmatch(r"[0-9a-f]{40,64}", merge.get("oid", ""))
-                and text(repo, "for-each-ref", "--format=%(refname)", base)
-                and ancestor(repo, merge["oid"], base)
-            ):
-                return
+    # Local branch aliases and commits from earlier PR iterations are complete
+    # too. Descendants added after the merged PR head still block retirement.
+    if (
+        "origin" in text(repo, "remote").splitlines()
+        and head in completed_pr_commits(repo)
+    ):
+        return
     raise Preserve(
         "branch has no verified completion (base ancestry, matching merged PR, or gone branch upstream)"
     )
