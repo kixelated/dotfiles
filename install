@@ -60,6 +60,20 @@ fi
 # deprecated and Codex-managed (.system lives there), so leave it alone.
 # Skills live in .claude/skills; .agents/skills links to the same directory.
 mkdir -p ~/.claude ~/.codex ~/.agents
+# Merge tracked Claude environment settings without replacing local preferences.
+python3 - "$DIR/.claude/settings.json" "$HOME/.claude/settings.json" <<'PYTHON'
+import json
+import os
+import sys
+from pathlib import Path
+
+source, target = map(Path, sys.argv[1:])
+defaults = json.loads(source.read_text())
+settings = json.loads(target.read_text()) if target.exists() else {}
+settings.setdefault("env", {}).update(defaults["env"])
+with open(target, "w", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+    output.write(json.dumps(settings, indent=2) + "\n")
+PYTHON
 rm -rf ~/.claude/skills ~/.agents/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
