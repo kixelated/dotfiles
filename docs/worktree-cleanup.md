@@ -22,25 +22,29 @@ submodule commits. Missing or failed inspection preserves the checkout.
 Preliminary inspections share an activity snapshot; every removal checks fresh
 host activity. Branches are never deleted.
 
-A branch must be an ancestor of the base, have an exact-HEAD merged GitHub PR
-whose merge commit survives on that PR's actual base, or track its own deleted
+A branch must be an ancestor of the base, have a HEAD included in the commit
+history of a merged GitHub PR whose merge commit survives on that PR's actual
+base, or track its own deleted
 origin branch. Other remotes are not refreshed and cannot prove deletion.
 An inherited upstream of `origin/main` is not the feature's
-upstream. GitHub proofs cover squash merges and release branches; commits made
-after a merge do not qualify. Detached HEADs need a surviving local branch or
-tag. A live run fetches/prunes origin first; a dry run leaves refs unchanged.
+upstream. GitHub proofs cover squash merges, local branch aliases, earlier PR
+iterations,
+and release branches. Commits added after the merged PR head do not qualify.
+Proof is refreshed when the actual base branch tip changes. Detached HEADs need
+a surviving local branch or tag. A live run fetches/prunes origin first; a dry run leaves refs unchanged.
 
 ```sh
 clean.sh --dry-run --archive-local-data
 ```
 
-The service enables `--archive-local-data`: ignored drafts, old package configs,
-and other local files are copied into
+The public `clean.sh` command and service enable `--archive-local-data` by
+default: ignored drafts, old package configs, and other local files are copied into
 `${XDG_STATE_HOME:-$HOME/.local/state}/worktree-clean/archives/<id>/` before Git
 removes the checkout. Copies preserve symlinks, permissions, and timestamps;
 content hashes and metadata are verified, files/directories are synced, and
 changes during backup preserve the original. Backups are never automatically
-purged. A failed backup leaves the original intact (and may leave a partial
+purged. A `target/` directory without a valid Cargo `CACHEDIR.TAG` is archived
+as local data, since older checkouts can contain drafts and scripts there. A failed backup leaves the original intact (and may leave a partial
 backup).
 
 Each completed backup has a `manifest.json` with the original checkout path,
@@ -57,3 +61,13 @@ restriction on nested repositories.
 
 The service also releases idle MBX workspace claims and runs MBX GC with a
 25 GiB object-cache budget when no builders or managed targets are active.
+
+## Keep new worktrees clean
+
+Keep PR text, review drafts, logs, inspection patches, helper scripts, and
+temporary clones in the checkout's ignored `.tmp/`, which retirement removes
+with the worktree (the `quest guide` Workspace rule).
+Commit intended source changes before ending a task and restore only generated
+changes from that task's own checks.
+Track the actual PR branch when pushing so completion remains discoverable.
+The shared Claude/Codex instructions enforce this workflow for new tasks.
