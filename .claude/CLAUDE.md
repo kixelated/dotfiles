@@ -14,6 +14,9 @@
 - Pushing to a contributor's fork branch is approved when it's the head of an open PR against a `kixelated` or `moq-dev` repo that allows maintainer edits.
 - Before fixing a failure that also breaks the base branch, search open PRs for an existing fix.
 - Once scope is settled and local checks pass, commit, push, and open the PR without asking.
+- Approve `action_required` fork CI runs on `kixelated` and `moq-dev` repos without asking, but only for the current head of an open PR.
+- When `gh` hits the GraphQL rate limit (the quota is shared by every parallel session), fall back to REST via `gh api` for reading, commenting, closing, and merging with a pinned head SHA.
+- If Codex's review of a PR's current head stalls (👀 or "running") for 30 minutes or more, post one `@codex review` per head and keep waiting.
 
 # Loops
 
