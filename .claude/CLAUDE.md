@@ -17,13 +17,9 @@
 
 # Loops
 
-- Back out when minimal progress is being made, rather than burn tokens.
-- Before ending a coding task, pausing for a blocking decision, or handing off work, commit a checkpoint of meaningful source changes. Record what remains unresolved and which checks passed or were not run.
-- Keep disposable scratch out of checkpoints and remove it before handoff. Preserve source changes and local-only submodule commits before releasing a worktree.
-- Put PR bodies, review drafts, logs, inspection patches, helper scripts, and temporary clones in the checkout's `.tmp/`, so they disappear with the worktree. If the repo doesn't ignore `.tmp/`, add it to `.git/info/exclude`. Never write them to `/tmp`, a sibling of the checkout, or anywhere else in the checkout.
-- Finish with the intended source changes committed and a clean checkout. Restore only incidental generated changes from your own commands; preserve pre-existing and unrelated changes. Push completed work and track the actual PR branch so cleanup can verify completion.
-- Wait on background work with a blocking command that ends on its terminal state, not short timed polls. Bound each wait under an hour so the prompt cache stays warm, and re-run it on timeout. Stay silent on notifications that change nothing.
-- Sub-agents end their turn only with a final result or a question, never with background work still running.
+- Follow the Workspace rules from `quest guide` in every repository (outside a quest repo, read [them on GitHub](https://github.com/kixelated/quest/blob/main/assets/AGENTS.md#workspace)): scratch in the checkout's `.tmp/`, checkpoints, a clean checkout at handoff, blocking waits, and sub-agents that end without background work.
+- Preserve local-only submodule commits before releasing a worktree, and track the actual PR branch so cleanup can verify completion.
+- Stay silent on notifications that change nothing.
 
 # Shell
 

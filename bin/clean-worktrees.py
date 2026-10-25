@@ -105,6 +105,8 @@ ARTIFACTS = {
     "media",
     ".auth",
     "test-results",
+    # Agent scratch by rule (`quest guide`, Workspace): disposable with its worktree.
+    ".tmp",
 }
 
 

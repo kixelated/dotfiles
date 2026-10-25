@@ -480,6 +480,12 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual((backup / "review.md").read_text(), "valuable review notes")
         self.assertEqual((backup / "debug/object").read_text(), "unknown build state")
 
+    def test_agent_scratch_is_disposable(self):
+        self.ignored(".tmp/", ".tmp/pr-body.md", "draft")
+        self.retire()
+        self.assertFalse(self.wt.exists())
+        self.assertFalse((self.root / "state").exists())
+
     def test_marked_cargo_target_is_reproducible(self):
         self.ignored("target/", "target/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n")
         (self.wt / "target/debug").mkdir()

@@ -65,8 +65,9 @@ The service also releases idle MBX workspace claims and runs MBX GC with a
 ## Keep new worktrees clean
 
 Keep PR text, review drafts, logs, inspection patches, helper scripts, and
-temporary clones in a per-task directory outside the checkout (`mktemp -d`).
+temporary clones in the checkout's ignored `.tmp/`, which retirement removes
+with the worktree (the `quest guide` Workspace rule).
 Commit intended source changes before ending a task and restore only generated
-changes from that task's own checks. Do not hide scratch with new ignore rules.
+changes from that task's own checks.
 Track the actual PR branch when pushing so completion remains discoverable.
 The shared Claude/Codex instructions enforce this workflow for new tasks.
