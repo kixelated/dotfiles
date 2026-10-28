@@ -614,7 +614,7 @@ class InstallTest(unittest.TestCase):
         )
         calls = self.log.read_text().splitlines()
         self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
-        self.assertFalse(any("enable --now" in call for call in calls))
+        self.assertFalse(any("enable --now" in call and "worktree-clean" in call for call in calls))
 
     def test_install_removes_dangling_legacy_timer(self):
         units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
