@@ -47,10 +47,16 @@ mise install mr-boxington
 mise exec -- mbx setup --global
 mise exec -- mbx setup --global --status
 
-# Install the manual cleanup service and retire any old automatic timer.
+# Install the manual cleanup service, retire its old automatic timer, and
+# schedule weekly Nix store GC.
 if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null; then
 	if systemctl --user show-environment >/dev/null 2>&1; then
 		"$DIR/bin/install-worktree-clean.sh"
+		# NixOS hosts collect through nix.gc.automatic instead.
+		if [ ! -e /etc/NIXOS ] && [ -x /nix/var/nix/profiles/default/bin/nix-collect-garbage ]; then
+			systemctl --user link "$DIR/systemd/nix-gc.service"
+			systemctl --user enable --now "$DIR/systemd/nix-gc.timer"
+		fi
 	else
 		echo "Skipping worktree cleanup service: no running systemd user manager"
 	fi

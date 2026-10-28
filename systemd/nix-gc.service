@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect Nix store garbage older than 30 days
+
+[Service]
+Type=oneshot
+ExecStart=/nix/var/nix/profiles/default/bin/nix-collect-garbage --delete-older-than 30d
+Nice=19
+IOSchedulingClass=idle
