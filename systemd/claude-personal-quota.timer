@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh personal Claude quota priorities every five minutes
+
+[Timer]
+OnActiveSec=1min
+OnUnitInactiveSec=5min
+Unit=claude-personal-quota.service
+
+[Install]
+WantedBy=timers.target
