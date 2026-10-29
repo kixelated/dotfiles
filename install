@@ -66,6 +66,7 @@ fi
 # deprecated and Codex-managed (.system lives there), so leave it alone.
 # Skills live in .claude/skills; .agents/skills links to the same directory.
 mkdir -p ~/.claude ~/.codex ~/.agents
+python3 "$DIR/bin/install-claude-cache.py"
 rm -rf ~/.claude/skills ~/.agents/skills
 rm -f ~/.claude/CLAUDE.md ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/CLAUDE.md" ~/.claude/CLAUDE.md
