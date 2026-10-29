@@ -14,7 +14,7 @@ def main():
         settings = json.loads(path.read_text()) if path.exists() else {}
         policy = {
             'promptCacheTtl': '1h',
-            'subagentPromptCacheTtl': '5m' if profile == '.claude-api-credits' else '1h',
+            'subagentPromptCacheTtl': '1h',
         }
         if all(settings.get(key) == value for key, value in policy.items()):
             continue
