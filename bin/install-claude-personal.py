@@ -12,8 +12,8 @@ import tarfile
 import tempfile
 import urllib.request
 
-VERSION = '8.0.45'
-SHA256 = 'e9e3a33a489d8a94ea9bd4b8eb4bb9286a978c3df11dc4c49f5ef393ef0fdc68'
+VERSION = '8.0.47'
+SHA256 = '2b5111dc6a0dfe0d607457787f794330d1b477bc9daa6337c26b0cd032a7827e'
 URL = f'https://github.com/router-for-me/CLIProxyAPI/releases/download/v{VERSION}/CLIProxyAPI_{VERSION}_linux_amd64.tar.gz'
 
 
