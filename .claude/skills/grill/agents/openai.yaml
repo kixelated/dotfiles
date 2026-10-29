@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grill"
+  short_description: "Stress-test and fully scope unsettled thinking"
+  default_prompt: "Use $grill to stress-test this idea through a frontier-based interview before taking action."

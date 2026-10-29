@@ -1,0 +1,4 @@
+interface:
+  display_name: "AFK"
+  short_description: "Proceed unattended with the recommended course of action"
+  default_prompt: "Use $afk to keep going with the recommended course of action while I'm away."
