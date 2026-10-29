@@ -218,6 +218,7 @@ def fingerprint(path):
 
 def archive_local_data(wt, paths, dry):
     """Copy and verify data before Git removes its original checkout."""
+    paths = sorted(set(paths))
     state = Path(
         os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
     ).resolve()
@@ -232,6 +233,8 @@ def archive_local_data(wt, paths, dry):
         before = fingerprint(source)
         target = destination / "files" / relative
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if target.exists() or target.is_symlink():
+            raise Preserve(f"archive destination already exists: {target}")
         shutil.copy2(source, target, follow_symlinks=False)
         if not target.is_symlink():
             with target.open("rb") as stream:
