@@ -612,6 +612,11 @@ class InstallTest(unittest.TestCase):
             (Path(self.env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
             self.repo / "bin/clean-worktrees.py",
         )
+        for profile in (".claude-personal", ".claude-api-credits"):
+            self.assertEqual(
+                (Path(self.env["HOME"]) / profile / "CLAUDE.md").resolve(),
+                self.repo / ".claude/CLAUDE.md",
+            )
         calls = self.log.read_text().splitlines()
         self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
         self.assertFalse(any("enable --now" in call and "worktree-clean" in call for call in calls))
@@ -626,6 +631,14 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((units / "worktree-clean.timer").is_symlink())
         self.assertFalse((units / "timers.target.wants/worktree-clean.timer").is_symlink())
         self.assertIn("systemctl --user stop worktree-clean.timer", self.log.read_text())
+
+    def test_install_preserves_alternate_profile_instructions(self):
+        path = Path(self.env["HOME"]) / ".claude-api-credits/CLAUDE.md"
+        path.parent.mkdir()
+        path.write_text("Custom profile instructions\n")
+        self.install()
+        self.assertEqual(path.read_text(), "Custom profile instructions\n")
+        self.assertFalse(path.is_symlink())
 
     def test_no_user_manager_skips_service_and_finishes_install(self):
         (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")

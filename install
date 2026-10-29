@@ -73,6 +73,14 @@ ln -s "$DIR/.claude/skills" ~/.claude/skills
 ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/skills" ~/.agents/skills
 
+# Alternate Claude profiles need their own entrypoint for shared instructions.
+for profile in ~/.claude-personal ~/.claude-api-credits; do
+	mkdir -p "$profile"
+	if [ ! -e "$profile/CLAUDE.md" ] && [ ! -L "$profile/CLAUDE.md" ]; then
+		ln -s "$DIR/.claude/CLAUDE.md" "$profile/CLAUDE.md"
+	fi
+done
+
 # Repositories can explicitly opt into this loader through their trusted
 # .codex/config.toml and a reviewed hook that captures the environment.
 rm -f ~/.codex/bash-env.sh
