@@ -405,6 +405,19 @@ class CleanupTest(unittest.TestCase):
         )
         self.assertEqual(os.readlink(backup), "/not/a/real/secret")
 
+    def test_duplicate_directory_symlink_never_writes_outside_archive(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "sentinel").write_text("keep")
+        link = self.wt / "result"
+        link.symlink_to(outside, target_is_directory=True)
+        cleanup.archive_local_data(self.wt, [link, link], False)
+        self.assertEqual(sorted(p.name for p in outside.iterdir()), ["sentinel"])
+        backup = next((self.root / "state/worktree-clean/archives").glob("*/files/result"))
+        self.assertTrue(backup.is_symlink())
+        self.assertEqual(os.readlink(backup), str(outside))
+        self.assertEqual((outside / "sentinel").read_text(), "keep")
+
     def test_archive_copy_failure_keeps_original(self):
         source = self.ignored(".env", ".env")
         with (
