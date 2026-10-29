@@ -1,0 +1,20 @@
+[Unit]
+Description=Personal Claude Max account gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/cliproxy-personal/cli-proxy-api -config %h/.config/cliproxy-personal/config.yaml
+WorkingDirectory=%h/.local/share/cliproxy-personal
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/cliproxy-personal %h/.local/share/cliproxy-personal
+
+[Install]
+WantedBy=default.target

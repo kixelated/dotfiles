@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Run the official Claude Code binary through the personal subscription hub."""
+import os
+from pathlib import Path
+import sys
+
+home = Path.home()
+env = os.environ.copy()
+for name in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
+             'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS'):
+    env.pop(name, None)
+env.update({
+    'CLAUDE_CONFIG_DIR': str(home / '.claude-personal'),
+    'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
+    'ANTHROPIC_AUTH_TOKEN': (home / '.config/cliproxy-personal/client-key').read_text().strip(),
+    'ANTHROPIC_API_KEY': '',
+    'CLAUDE_CODE_OAUTH_TOKEN': '',
+})
+cli = str(home / '.local/bin/claude')
+os.execve(cli, [cli, *sys.argv[1:]], env)

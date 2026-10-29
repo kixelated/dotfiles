@@ -1,0 +1,15 @@
+[Unit]
+Description=Prefer personal Claude accounts with the soonest weekly reset
+Requires=cliproxy-personal.service
+After=cliproxy-personal.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-personal-quota.py
+TimeoutStartSec=4min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/cliproxy-personal
