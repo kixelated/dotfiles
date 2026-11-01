@@ -12,6 +12,14 @@ runs the agent; CLIProxyAPI forwards its model requests.
   remains the separate three-key API-credit pool on the NixOS gateway.
 - In T3’s **Usage → Limits**, the **Claude Personal** hub shows all three accounts.
 - In a terminal, run `claude-personal` with the usual Claude Code arguments.
+  To make Personal this host's default for `claude`, run
+  `python3 bin/install-claude-default.py`. This also covers tools that disable
+  Claude's user settings. Explicit provider environment settings, including T3's
+  Claude API provider, keep their own routing; `claude-personal` always selects
+  Personal. The official binary remains available as `claude-native`.
+  If a Claude Code update replaces the launcher, rerun the default installer.
+  To restore the native default, point `~/.local/bin/claude` at the target of
+  `~/.local/bin/claude-native`.
 - Show account usage: `claude-personal-quota.py --status`.
 - Refresh now: `systemctl --user start claude-personal-quota.service`.
 - Check services: `systemctl --user status cliproxy-personal.service claude-personal-quota.timer`.

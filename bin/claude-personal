@@ -4,17 +4,34 @@ import os
 from pathlib import Path
 import sys
 
-home = Path.home()
-env = os.environ.copy()
-for name in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
-             'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS'):
-    env.pop(name, None)
-env.update({
-    'CLAUDE_CONFIG_DIR': str(home / '.claude-personal'),
-    'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
-    'ANTHROPIC_AUTH_TOKEN': (home / '.config/cliproxy-personal/client-key').read_text().strip(),
-    'ANTHROPIC_API_KEY': '',
-    'CLAUDE_CODE_OAUTH_TOKEN': '',
-})
-cli = str(home / '.local/bin/claude')
-os.execve(cli, [cli, *sys.argv[1:]], env)
+CLOUD_SELECTORS = ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
+                   'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_ANTHROPIC_AWS')
+ROUTING = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY',
+           'CLAUDE_CODE_OAUTH_TOKEN', *CLOUD_SELECTORS)
+
+
+def main():
+    home = Path.home()
+    env = os.environ.copy()
+    explicit_personal = Path(sys.argv[0]).name == 'claude-personal'
+    if explicit_personal or not any(env.get(name) for name in ROUTING):
+        for name in CLOUD_SELECTORS:
+            env.pop(name, None)
+        if explicit_personal or not env.get('CLAUDE_CONFIG_DIR'):
+            env['CLAUDE_CONFIG_DIR'] = str(home / '.claude-personal')
+        env.update({
+            'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
+            'ANTHROPIC_AUTH_TOKEN': (home / '.config/cliproxy-personal/client-key').read_text().strip(),
+            'ANTHROPIC_API_KEY': '',
+            'CLAUDE_CODE_OAUTH_TOKEN': '',
+        })
+    cli = home / '.local/bin/claude-native'
+    if not cli.exists():
+        cli = home / '.local/bin/claude'
+    if cli.resolve() == Path(__file__).resolve():
+        raise SystemExit('Official Claude binary missing; reinstall Claude Code and run install-claude-default.py.')
+    os.execve(str(cli), [str(cli), *sys.argv[1:]], env)
+
+
+if __name__ == '__main__':
+    main()
