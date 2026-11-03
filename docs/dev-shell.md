@@ -27,12 +27,20 @@ agent's environment. Variables an agent filters out of its commands, such as
 Codex's default secret exclusions, are therefore never re-exported.
 
 direnv keys each approval by the `.envrc` path and contents, so every new
-worktree needs one. The hook runs `direnv allow` itself only when `.envrc`,
-`flake.nix`, and `flake.lock` match the last-fetched remote default branch
-(`origin/HEAD`). It never fetches, and it never whitelists directories. A
-changed file, a missing `origin/HEAD`, or a `direnv deny` leaves the checkout
-unapproved. The hook then exits 1 with one stderr line asking for
-`direnv allow`.
+worktree needs one. The hook runs `direnv allow` itself only when both hold:
+
+- `HEAD` is contained in some last-fetched `origin` branch
+  (`git for-each-ref --contains HEAD refs/remotes/origin/`). A session rooted
+  at an outside contributor's fork PR head or at an unpushed local commit is
+  therefore never auto-approved, even when its files match.
+- `.envrc`, `flake.nix`, and `flake.lock` match the last-fetched remote default
+  branch (`origin/HEAD`).
+
+It never fetches, and it never whitelists directories. A HEAD off every origin
+branch, a changed file, a missing `origin/HEAD`, or a `direnv deny` leaves the
+checkout unapproved. The hook then exits 1 with one stderr line asking for
+`direnv allow`. A checkout that is already approved keeps loading after new
+local commits, because direnv's approval does not depend on `HEAD`.
 
 Files that `.envrc` sources, or that `flake.nix` imports, are not compared.
 Changing only those keeps the existing approval, as plain direnv would.

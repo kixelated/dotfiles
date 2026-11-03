@@ -20,9 +20,10 @@ Only the diff is written, so variables the agent filtered out of its commands
 environment.
 
 direnv keys approval on the `.envrc` path and contents, so each new worktree
-needs `direnv allow`. The hook approves it only when `.envrc`, `flake.nix`, and
-`flake.lock` match the remote's default branch. Anything else needs a human to
-run `direnv allow`, and the hook says so on stderr.
+needs `direnv allow`. The hook approves it only when HEAD is on some `origin`
+branch and `.envrc`, `flake.nix`, and `flake.lock` match the remote's default
+branch. Anything else needs a human to run `direnv allow`, and the hook says so
+on stderr.
 """
 
 import json
@@ -83,6 +84,8 @@ def main(argv):
         ref = default_ref(root)
         if ref is None:
             return refuse(root, 'the remote default branch is unknown, so it cannot be checked')
+        if not on_origin(root):
+            return refuse(root, "HEAD isn't on any origin branch")
         changed = changed_files(root, ref)
         if changed:
             return refuse(root, f'{", ".join(changed)} changed from {ref.removeprefix("refs/remotes/")}')
@@ -144,6 +147,16 @@ def default_ref(root):
     if result.returncode != 0 or not ref:
         return None
     return ref if git(root, 'rev-parse', '-q', '--verify', ref + '^{commit}').returncode == 0 else None
+
+
+def on_origin(root):
+    """Whether HEAD is contained in some `origin` branch, as last fetched.
+
+    A fork PR head or an unpushed local commit is not, so a checkout of one is
+    never approved even when its reviewed files match.
+    """
+    result = git(root, 'for-each-ref', '--count=1', '--contains', 'HEAD', 'refs/remotes/origin/')
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 
 def changed_files(root, ref):

@@ -221,6 +221,47 @@ class HookTests(unittest.TestCase):
                 self.assertEqual(self.env_file.read_text(), '')
                 (self.checkout / name).write_text(original)
 
+    def commit(self, repo, name='README', message='change'):
+        (repo / name).write_text(message + '\n')
+        git(repo, 'add', name)
+        git(repo, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message)
+
+    def assert_off_origin(self, result):
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("HEAD isn't on any origin branch", result.stderr)
+        self.assertIn('direnv allow', result.stderr)
+        self.assertFalse(self.allowed())
+        self.assertEqual(self.env_file.read_text(), '')
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_head_on_another_origin_branch_is_allowed(self):
+        upstream = self.root / 'upstream'
+        git(upstream, 'checkout', '-q', '-b', 'feature')
+        self.commit(upstream)
+        git(upstream, 'checkout', '-q', 'main')
+        git(self.checkout, 'fetch', '-q', 'origin')
+        git(self.checkout, 'checkout', '-q', '--detach', 'origin/feature')
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.allowed())
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_unpushed_commit_needs_a_manual_allow(self):
+        self.commit(self.checkout)
+        self.assert_off_origin(self.run_hook())
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_fork_head_needs_a_manual_allow(self):
+        fork = self.root / 'fork'
+        git(self.root, 'clone', '-q', str(self.root / 'upstream'), str(fork))
+        self.commit(fork, message='contribution')
+        git(self.checkout, 'remote', 'add', 'contributor', str(fork))
+        git(self.checkout, 'fetch', '-q', 'contributor')
+        git(self.checkout, 'checkout', '-q', '-b', 'pr', 'contributor/main')
+        # The reviewed files still match origin/main; only HEAD's origin differs.
+        self.assert_off_origin(self.run_hook())
+
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_untracked_envrc_is_not_allowed(self):
         sub = self.checkout / 'tool'
