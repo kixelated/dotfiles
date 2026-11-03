@@ -62,6 +62,12 @@ def update_json(path, mode):
     settings = json.loads(path.read_text()) if path.exists() else {}
     if not merge(settings, mode):
         return False
+    write_json(path, settings)
+    return True
+
+
+def write_json(path, settings):
+    """Atomically replace `path`, keeping its mode (0600 when new)."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     file_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
     temporary = None
@@ -76,7 +82,6 @@ def update_json(path, mode):
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     print(f'Updated {path}')
-    return True
 
 
 class AppServer:
@@ -113,6 +118,7 @@ class AppServer:
         self.process.stdin.close()
         self.process.terminate()
         self.process.wait()
+        self.process.stdout.close()
 
 
 def install_codex(codex_home):
