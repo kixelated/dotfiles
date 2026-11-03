@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Load a checkout's direnv dev shell into Claude Code and Codex commands.
+
+`bin/install-dev-shell.py` installs this as a user-level SessionStart hook, so
+agents get flake-pinned tools (just, cargo, ...) without any repository
+shipping its own hook. Usage: `dev-shell-hook claude` or `dev-shell-hook codex`.
+
+It is a no-op without direnv or an `.envrc`. Otherwise it captures what the dev
+shell changes relative to the agent's own environment and writes that diff as a
+sourceable snapshot:
+
+- claude: a sidecar next to $CLAUDE_ENV_FILE, which gets one line sourcing it.
+  Claude Code inlines $CLAUDE_ENV_FILE into every Bash command line, and Linux
+  caps one argv entry at 128KB, so the environment itself stays in the sidecar.
+- codex: `<checkout>/.direnv/codex-env.sh`, which `codex/bash-env.sh` sources
+  through BASH_ENV in every Codex shell command.
+
+Only the diff is written, so variables the agent filtered out of its commands
+(Codex drops secrets by default) are never re-exported from the hook's
+environment.
+
+direnv keys approval on the `.envrc` path and contents, so each new worktree
+needs `direnv allow`. The hook approves it only when `.envrc`, `flake.nix`, and
+`flake.lock` match the remote's default branch. Anything else needs a human to
+run `direnv allow`, and the hook says so on stderr.
+"""
+
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# Files that decide what the dev shell runs. Matching the default branch means
+# the contents were already reviewed and merged.
+REVIEWED = ('.envrc', 'flake.nix', 'flake.lock')
+
+# Shell bookkeeping that is not part of the dev shell.
+EXCLUDED = {'PWD', 'OLDPWD', 'SHLVL', '_', 'SHELLOPTS', 'BASHOPTS', 'BASH_VERSINFO', 'UID', 'EUID', 'PPID'}
+NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
+
+# `direnv status --json` approval states.
+ALLOWED, NOT_ALLOWED, DENIED = 0, 1, 2
+
+# Print the child's environment NUL-separated. The current interpreter is used
+# because `env -0` is not portable and nixpkgs' non-interactive bash lacks the
+# builtins that would otherwise list variables.
+DUMP = 'import os, sys; sys.stdout.buffer.write(b"".join(k + b"=" + v + b"\\0" for k, v in os.environb.items()))'
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in ('claude', 'codex'):
+        print('usage: dev-shell-hook claude|codex', file=sys.stderr)
+        return 2
+    mode = argv[1]
+
+    if mode == 'claude':
+        env_file = os.environ.get('CLAUDE_ENV_FILE')
+        project = os.environ.get('CLAUDE_PROJECT_DIR')
+        # Require both: older Claude Code versions have nowhere to export into,
+        # and an explicit project dir keeps a stray .envrc from being loaded.
+        if not env_file or not project:
+            return 0
+        root = Path(project)
+    else:
+        root = git_toplevel(Path.cwd())
+        # codex/bash-env.sh finds the snapshot through the checkout root.
+        if root is None:
+            return 0
+
+    if shutil.which('direnv') is None or not (root / '.envrc').is_file():
+        return 0
+
+    env = direnv_env()
+    state = allow_state(root, env)
+    if state == DENIED:
+        return refuse(root, 'it was denied with `direnv deny`')
+    if state != ALLOWED:
+        ref = default_ref(root)
+        if ref is None:
+            return refuse(root, 'the remote default branch is unknown, so it cannot be checked')
+        changed = changed_files(root, ref)
+        if changed:
+            return refuse(root, f'{", ".join(changed)} changed from {ref.removeprefix("refs/remotes/")}')
+        subprocess.run(['direnv', 'allow', str(root)], cwd=root, env=env,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=True)
+
+    loaded = load(root, env)
+    if loaded is None:
+        return 1
+    snapshot = render(env, loaded)
+
+    if mode == 'claude':
+        sidecar = Path(env_file + '.dev-shell')
+        write_private(sidecar, snapshot)
+        line = f'. {shlex.quote(str(sidecar))}\n'
+        existing = Path(env_file).read_text() if Path(env_file).exists() else ''
+        if line not in existing.splitlines(keepends=True):
+            with open(env_file, 'a') as output:
+                output.write('# dev shell (dotfiles dev-shell-hook)\n' + line)
+    else:
+        (root / '.direnv').mkdir(exist_ok=True)
+        write_private(root / '.direnv' / 'codex-env.sh', snapshot)
+    return 0
+
+
+def git(root, *args):
+    return subprocess.run(['git', *args], cwd=root, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True)
+
+
+def git_toplevel(directory):
+    result = git(directory, 'rev-parse', '--show-toplevel')
+    return Path(result.stdout.strip()) if result.returncode == 0 else None
+
+
+def direnv_env():
+    """The hook's environment without inherited direnv state.
+
+    A stale DIRENV_DIFF from the parent process makes direnv assume the dev
+    shell is already loaded and change nothing.
+    """
+    return {key: value for key, value in os.environb.items() if not key.startswith(b'DIRENV_')}
+
+
+def allow_state(root, env):
+    """direnv's approval of the .envrc: ALLOWED, NOT_ALLOWED, DENIED, or None."""
+    result = subprocess.run(['direnv', 'status', '--json'], cwd=root, env=env,
+                            stdin=subprocess.DEVNULL, capture_output=True)
+    try:
+        return json.loads(result.stdout)['state']['foundRC']['allowed']
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def default_ref(root):
+    """The remote default branch, as last fetched. The hook never fetches."""
+    result = git(root, 'symbolic-ref', '-q', 'refs/remotes/origin/HEAD')
+    ref = result.stdout.strip()
+    if result.returncode != 0 or not ref:
+        return None
+    return ref if git(root, 'rev-parse', '-q', '--verify', ref + '^{commit}').returncode == 0 else None
+
+
+def changed_files(root, ref):
+    """The reviewed files whose checkout contents differ from `ref`.
+
+    Blob hashes are compared directly because `git diff <ref>` ignores an
+    untracked .envrc that the ref also lacks.
+    """
+    changed = []
+    for name in REVIEWED:
+        upstream = git(root, 'rev-parse', '-q', '--verify', f'{ref}:./{name}')
+        upstream = upstream.stdout.strip() if upstream.returncode == 0 else None
+        local = None
+        if (root / name).is_file():
+            local = git(root, 'hash-object', '--', name).stdout.strip() or '?'
+        if local != upstream:
+            changed.append(name)
+    return changed
+
+
+def refuse(root, reason):
+    print(f'dev-shell-hook: {root}/.envrc is not allowed: {reason}. '
+          f'Review it, then run `direnv allow {root}` to load the dev shell.', file=sys.stderr)
+    return 1
+
+
+def load(root, env):
+    """The environment inside the dev shell, or None after reporting why not."""
+    result = subprocess.run(['direnv', 'exec', str(root), sys.executable, '-c', DUMP],
+                            cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True)
+    loaded = dict(entry.split(b'=', 1) for entry in result.stdout.split(b'\0') if b'=' in entry)
+    if result.returncode != 0 or not loaded:
+        log = result.stderr.decode(errors='replace').strip().splitlines()[-20:]
+        print('\n'.join(log), file=sys.stderr)
+        print(f'dev-shell-hook: could not load the dev shell for {root}.', file=sys.stderr)
+        return None
+    return loaded
+
+
+def render(before, after):
+    """Shell commands turning `before` into `after`, skipping shell bookkeeping."""
+    def keep(key):
+        name = key.decode(errors='surrogateescape')
+        return bool(NAME.match(name)) and name not in EXCLUDED and not name.startswith('DIRENV_')
+
+    lines = []
+    for key in sorted(before.keys() - after.keys()):
+        if keep(key):
+            lines.append(b'unset ' + key + b'\n')
+    for key in sorted(after):
+        if keep(key) and before.get(key) != after[key]:
+            value = shlex.quote(after[key].decode(errors='surrogateescape'))
+            lines.append(b'export ' + key + b'=' + value.encode(errors='surrogateescape') + b'\n')
+    return b''.join(lines)
+
+
+def write_private(path, data):
+    """Replace `path` atomically. mkstemp keeps credentials owner-only."""
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.')
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            output.write(data)
+        os.replace(temporary, path)
+    except BaseException:
+        os.unlink(temporary)
+        raise
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
