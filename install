@@ -78,4 +78,8 @@ ln -s "$DIR/.claude/skills" ~/.agents/skills
 # own. See docs/dev-shell.md.
 python3 "$DIR/bin/install-dev-shell.py"
 
+# Default model and reasoning effort for Claude Code and Codex. See
+# docs/agent-defaults.md.
+python3 "$DIR/bin/install-agent-defaults.py"
+
 git submodule update --init --remote
