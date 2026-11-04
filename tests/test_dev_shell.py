@@ -311,6 +311,23 @@ class HookTests(unittest.TestCase):
                     path.write_text(original)
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_keeps_the_snapshot_when_nix_direnv_falls_back(self):
+        # An inherited marker does not count as a fallback.
+        self.assertEqual(self.run_hook('codex', NIX_DIRENV_DID_FALLBACK='1').returncode, 0)
+        snapshot = self.checkout / '.direnv' / 'codex-env.sh'
+        captured = snapshot.read_bytes()
+        stale = Path(str(snapshot) + '.stale')
+        stale.touch()
+        # Emulate nix-direnv reloading its cached profile after evaluation fails.
+        (self.checkout / '.envrc').write_text('export NIX_DIRENV_DID_FALLBACK=1 DEV_SHELL_TEST=cached\n')
+        subprocess.run(['direnv', 'allow', str(self.checkout)], env=self.env, check=True, capture_output=True)
+        result = self.run_hook('codex', NIX_DIRENV_DID_FALLBACK='1')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('fell back', result.stderr)
+        self.assertEqual(snapshot.read_bytes(), captured)
+        self.assertTrue(stale.exists())
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_codex_rejects_legacy_snapshots_and_tracks_missing_flakes(self):
         loader = ROOT / 'codex' / 'bash-env.sh'
         directory = self.checkout / '.direnv'

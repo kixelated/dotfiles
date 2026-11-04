@@ -52,6 +52,9 @@ NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 # `direnv status --json` approval states.
 ALLOWED, NOT_ALLOWED, DENIED = 0, 1, 2
 
+# nix-direnv sets this when it falls back to a cached profile.
+FALLBACK = b'NIX_DIRENV_DID_FALLBACK'
+
 # Print the child's environment NUL-separated. The current interpreter is used
 # because `env -0` is not portable and nixpkgs' non-interactive bash lacks the
 # builtins that would otherwise list variables.
@@ -114,6 +117,13 @@ def main(argv):
     loaded = load(root, env)
     if loaded is None:
         return 1
+    if mode == 'codex' and FALLBACK in loaded:
+        # nix-direnv reloaded its cached profile after the flake failed to
+        # evaluate. It may belong to another flake, so stamping it would
+        # certify the wrong environment; keep the previous snapshot instead.
+        print(f'dev-shell-hook: the flake in {root} failed to evaluate and nix-direnv '
+              'fell back to a cached environment, so the previous snapshot is kept.', file=sys.stderr)
+        return 1
     snapshot = render(env, loaded)
 
     if mode == 'claude':
@@ -148,8 +158,11 @@ def direnv_env():
 
     A stale DIRENV_DIFF from the parent process makes direnv assume the dev
     shell is already loaded and change nothing.
+    An inherited nix-direnv fallback marker is dropped too, so its presence
+    after loading means this load fell back.
     """
-    return {key: value for key, value in os.environb.items() if not key.startswith(b'DIRENV_')}
+    return {key: value for key, value in os.environb.items()
+            if not key.startswith(b'DIRENV_') and key != FALLBACK}
 
 
 def allow_state(root, env):
