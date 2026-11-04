@@ -42,7 +42,7 @@ _codex_load_env() {
 
 	# A reverted flake or a concurrent recapture can make the snapshot valid
 	# again before this process sees the hook clear its warning marker.
-	[ ! -e "$env_file.stale" ] || rm -f "$env_file.stale"
+	[ ! -e "$env_file.stale" ] || rm -f "$env_file.stale" 2>/dev/null || true
 
 	# shellcheck disable=SC1090
 	source "$env_file"

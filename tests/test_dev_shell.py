@@ -335,8 +335,20 @@ class HookTests(unittest.TestCase):
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_codex_stale_snapshot_warns_when_marker_is_unwritable(self):
         self.assertEqual(self.run_hook('codex').returncode, 0)
-        (self.checkout / 'flake.lock').write_text('changed\n')
         directory = self.checkout / '.direnv'
+        marker = directory / 'codex-env.sh.stale'
+        marker.touch()
+        directory.chmod(0o555)
+        try:
+            matching = subprocess.run(
+                ['bash', '-c', 'printf "%s" "$DEV_SHELL_TEST"'], cwd=self.checkout,
+                env={**self.env, 'BASH_ENV': str(ROOT / 'codex' / 'bash-env.sh')},
+                capture_output=True, text=True, check=True)
+            self.assertEqual((matching.stdout, matching.stderr), ("loaded value's", ''))
+        finally:
+            directory.chmod(0o755)
+        marker.unlink()
+        (self.checkout / 'flake.lock').write_text('changed\n')
         directory.chmod(0o555)
         try:
             result = subprocess.run(
