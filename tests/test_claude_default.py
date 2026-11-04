@@ -2,6 +2,7 @@ import importlib.util
 import os
 from pathlib import Path
 import runpy
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,6 +20,9 @@ class DefaultTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(dir=ROOT / '.tmp')
         self.addCleanup(self.directory.cleanup)
         self.home = Path(self.directory.name)
+        self.source = self.home / 'checkout'
+        (self.source / 'bin').mkdir(parents=True)
+        shutil.copyfile(ROOT / 'bin/claude-personal', self.source / 'bin/claude-personal')
         self.binary = self.home / 'official-claude'
         self.binary.write_text('official binary')
         (self.home / '.local/bin').mkdir(parents=True)
@@ -28,15 +32,24 @@ class DefaultTests(unittest.TestCase):
         key.write_text('personal-test-key\n')
 
     def invoke(self, command, env):
+        installed = self.home / '.local/lib/claude-personal'
+        program = runpy.run_path(str(installed)) if installed.exists() else launcher
         with patch.dict(os.environ, env, clear=True), patch('pathlib.Path.home', return_value=self.home), \
                 patch('sys.argv', [command, '--setting-sources', '', '--print', 'hello']), \
                 patch('os.execve') as execute:
-            launcher['main']()
+            program['main']()
         return execute.call_args.args
 
     def test_default_survives_disabled_settings_and_preserves_the_native_binary(self):
-        installer.install(self.home, ROOT)
-        installer.install(self.home, ROOT)
+        installer.install(self.home, self.source)
+        installer.install(self.home, self.source)
+        installed = self.home / '.local/bin/claude'
+        personal = self.home / '.local/bin/claude-personal'
+        self.assertEqual(installed.resolve(), self.home / '.local/lib/claude-personal')
+        self.assertEqual(personal.resolve(), installed.resolve())
+        shutil.rmtree(self.source)
+        self.assertTrue(installed.is_file())
+        self.assertTrue(os.access(installed, os.X_OK))
         cli, argv, env = self.invoke('claude', {})
         self.assertEqual(Path(cli).resolve(), self.binary)
         self.assertEqual(argv[1:], ['--setting-sources', '', '--print', 'hello'])
@@ -45,8 +58,30 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(env['CLAUDE_CONFIG_DIR'], str(self.home / '.claude-personal'))
         self.assertEqual(env['CLAUDE_CODE_OAUTH_TOKEN'], '')
 
+    def test_migrates_checkout_links_even_when_the_checkout_launcher_is_missing(self):
+        cli = self.home / '.local/bin/claude'
+        native = self.home / '.local/bin/claude-native'
+        personal = self.home / '.local/bin/claude-personal'
+        native.symlink_to(self.binary)
+        cli.unlink()
+        old = self.home / 'old-checkout/bin/claude-personal'
+        old.parent.mkdir(parents=True)
+        for exists in (True, False):
+            with self.subTest(checkout_launcher_exists=exists):
+                old.write_text('old launcher')
+                cli.unlink(missing_ok=True)
+                personal.unlink(missing_ok=True)
+                cli.symlink_to(old)
+                personal.symlink_to(old)
+                if not exists:
+                    old.unlink()
+                installer.install(self.home, self.source)
+                self.assertEqual(native.resolve(), self.binary)
+                self.assertEqual(cli.resolve().read_bytes(), (self.source / 'bin/claude-personal').read_bytes())
+                self.assertEqual(personal.resolve(), cli.resolve())
+
     def test_explicit_api_and_cloud_providers_do_not_read_personal_credentials(self):
-        installer.install(self.home, ROOT)
+        installer.install(self.home, self.source)
         (self.home / '.config/cliproxy-personal/client-key').unlink()
         for env in ({'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8318', 'ANTHROPIC_AUTH_TOKEN': 'api-test-key',
                      'CLAUDE_CONFIG_DIR': '/api-profile'},
@@ -64,7 +99,7 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(env['ANTHROPIC_AUTH_TOKEN'], 'personal-test-key')
 
     def test_missing_native_binary_refuses_instead_of_recursing(self):
-        installer.install(self.home, ROOT)
+        installer.install(self.home, self.source)
         self.binary.unlink()
         with self.assertRaisesRegex(SystemExit, 'Official Claude binary missing'):
             self.invoke('claude', {})

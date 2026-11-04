@@ -17,7 +17,10 @@ runs the agent; CLIProxyAPI forwards its model requests.
   Claude's user settings. Explicit provider environment settings, including T3's
   Claude API provider, keep their own routing; `claude-personal` always selects
   Personal. The official binary remains available as `claude-native`.
-  If a Claude Code update replaces the launcher, rerun the default installer.
+  The installer copies the launcher to `~/.local/lib/claude-personal`, so both
+  commands keep working after switching or resetting this checkout. Rerun it to
+  update the installed launcher, repair old checkout links, or restore the default
+  after a Claude Code update.
   To restore the native default, point `~/.local/bin/claude` at the target of
   `~/.local/bin/claude-native`.
 - Show account usage: `claude-personal-quota.py --status`.
