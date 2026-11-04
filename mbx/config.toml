@@ -10,6 +10,16 @@ incremental = false
 # moq-net re-checked the moq workspace in ~23s this way versus ~40-50s without.
 learned_incremental = true
 
+[target]
+# A checkout can run binaries directly, without holding an mbx lease.
+# Reclaim its target when the checkout is removed, not while it still exists.
+keep = ["/"]
+
+[gc]
+# Fail a build on disk exhaustion instead of draining the shared cache to make
+# room for unrelated disk use. Normal cache budgets and abandoned-target GC stay.
+min_free_size = "none"
+
 [scheduler]
 # Leave cores for the desktop and dev stacks; parallel agent builds otherwise
 # take all 32.
