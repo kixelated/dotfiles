@@ -278,6 +278,65 @@ class HookTests(unittest.TestCase):
         self.assertEqual(wrapped, "loaded value's|kept|unset")
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_rejects_changed_flakes_until_recaptured(self):
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        for name in ('flake.nix', 'flake.lock'):
+            with self.subTest(name=name):
+                self.assertEqual(self.run_hook('codex').returncode, 0)
+                original = (self.checkout / name).read_text()
+                (self.checkout / name).write_text(original + '\n')
+                command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
+                env = {**self.env, 'BASH_ENV': str(loader)}
+                first = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                self.assertEqual(first.stdout, 'unset')
+                self.assertIn('stale', first.stderr)
+                again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                self.assertEqual((again.stdout, again.stderr), ('unset', ''))
+                self.assertEqual(self.run_hook('codex').returncode, 0)
+                refreshed = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                self.assertEqual((refreshed.stdout, refreshed.stderr), ("loaded value's", ''))
+                (self.checkout / name).write_text(original)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_rejects_legacy_snapshots_and_tracks_missing_flakes(self):
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        directory = self.checkout / '.direnv'
+        directory.mkdir()
+        (directory / 'codex-env.sh').write_text('export DEV_SHELL_TEST=legacy\n')
+        env = {**self.env, 'BASH_ENV': str(loader)}
+        command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
+        legacy = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual(legacy.stdout, 'unset')
+        self.assertIn('stale', legacy.stderr)
+        subprocess.run(['direnv', 'allow', str(self.checkout)], env=self.env, check=True, capture_output=True)
+        for name in ('flake.nix', 'flake.lock'):
+            (self.checkout / name).unlink()
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        missing = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((missing.stdout, missing.stderr), ("loaded value's", ''))
+        (self.checkout / 'flake.nix').write_text('{ }\n')
+        added = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual(added.stdout, 'unset')
+        self.assertIn('stale', added.stderr)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_explicit_nix_shell_wins_and_nested_bash_reloads(self):
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        env = {**self.env, 'BASH_ENV': str(loader), 'IN_NIX_SHELL': 'impure', 'DEV_SHELL_TEST': 'explicit'}
+        command = ['bash', '-c', 'printf "%s" "$DEV_SHELL_TEST"']
+        explicit = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((explicit.stdout, explicit.stderr), ('explicit', ''))
+        snapshot = self.checkout / '.direnv' / 'codex-env.sh'
+        with snapshot.open('a') as output:
+            output.write('export IN_NIX_SHELL=impure\n')
+        env.pop('IN_NIX_SHELL')
+        nested = subprocess.run(
+            ['bash', '-c', 'export DEV_SHELL_TEST=from-codex-snapshot; exec bash -c \'printf "%s" "$DEV_SHELL_TEST"\''],
+            cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((nested.stdout, nested.stderr), ("loaded value's", ''))
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_changed_reviewed_files_need_a_manual_allow(self):
         for name, contents in (('.envrc', 'export DEV_SHELL_TEST=edited\n'), ('flake.lock', '{"version": 8}\n')):
             with self.subTest(name=name):

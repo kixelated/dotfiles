@@ -97,6 +97,18 @@ def main(argv):
         subprocess.run(['direnv', 'allow', str(root)], cwd=root, env=env,
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=True)
 
+    # Capture before evaluation: if a flake changes while loading, the old
+    # stamp makes the resulting snapshot ineligible for the new checkout.
+    stamp = '# codex-env-flake:'
+    if mode == 'codex':
+        for name in ('flake.nix', 'flake.lock'):
+            digest = 'missing'
+            if (root / name).is_file():
+                result = git(root, 'hash-object', '--no-filters', '--', name)
+                result.check_returncode()
+                digest = result.stdout.strip()
+            stamp += ' ' + digest
+
     loaded = load(root, env)
     if loaded is None:
         return 1
@@ -113,7 +125,9 @@ def main(argv):
     else:
         name = {'codex': 'codex-env.sh', 'grok': 'grok-env.sh'}[mode]
         (root / '.direnv').mkdir(exist_ok=True)
-        write_private(root / '.direnv' / name, snapshot)
+        path = root / '.direnv' / name
+        write_private(path, stamp.encode() + b'\n' + snapshot)
+        Path(str(path) + '.stale').unlink(missing_ok=True)
     return 0
 
 
