@@ -19,7 +19,7 @@
 
 # Loops
 
-- Follow the Workspace rules from `quest guide` in every repository: scratch in the checkout's `.tmp/`, checkpoints, a clean checkout at handoff, blocking waits, and sub-agents that end without background work.
+- Follow the Workspace rules from `quest context` in every repository: scratch in the checkout's `.tmp/`, checkpoints, a clean checkout at handoff, blocking waits, and sub-agents that end without background work.
 - Preserve local-only submodule commits before releasing a worktree, and track the actual PR branch so cleanup can verify completion.
 - Stay silent on notifications that change nothing.
 
