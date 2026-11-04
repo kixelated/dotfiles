@@ -9,15 +9,16 @@ runs the agent; CLIProxyAPI forwards its model requests.
 
 - In Ubuntu's T3 environment, choose **Claude Personal**. It uses a separate
   `~/.claude-personal` profile and the localhost gateway. The **Claude API** provider
-  remains the separate three-key API-credit pool on the NixOS gateway.
+  remains the separate three-key API-credit pool.
 - In T3’s **Usage → Limits**, the **Claude Personal** hub shows all three accounts.
 - In a terminal, run `claude-personal` with the usual Claude Code arguments.
   To make Personal this host's default for `claude`, run
   `python3 bin/install-claude-default.py`. This also covers tools that disable
   Claude's user settings. Explicit provider environment settings, including T3's
   Claude API provider, keep their own routing; `claude-personal` always selects
-  Personal. The official binary remains available as `claude-native`.
-  The installer copies the launcher to `~/.local/lib/claude-personal`, so both
+  Personal. A config directory alone keeps its settings with Personal routing.
+  The official binary remains available as `claude-native`.
+  The installer copies the launcher to `~/.local/lib/claude-launcher`, so both
   commands keep working after switching or resetting this checkout. Rerun it to
   update the installed launcher, repair old checkout links, or restore the default
   after a Claude Code update.

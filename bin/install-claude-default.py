@@ -9,7 +9,7 @@ def install(home, source):
     native = home / '.local/bin/claude-native'
     personal = home / '.local/bin/claude-personal'
     launcher = source / 'bin/claude-personal'
-    installed = home / '.local/lib/claude-personal'
+    installed = home / '.local/lib/claude-launcher'
     if not cli.is_symlink():
         raise SystemExit(f'Expected the official Claude Code symlink at {cli}; refusing to replace a regular file.')
     if personal.exists() and not personal.is_symlink():
@@ -18,23 +18,24 @@ def install(home, source):
         raise SystemExit(f'Refusing to replace a regular file: {native}')
     current = cli.resolve()
     wrappers = {launcher.resolve(), installed.resolve(), personal.resolve()}
-    if current in wrappers or not cli.exists():
-        if not native.exists() or native.resolve() in wrappers:
+    if current in wrappers or current.name in ('claude-personal', 'claude-launcher') or not cli.exists():
+        if not native.exists() or native.resolve() in wrappers or native.resolve().name in ('claude-personal', 'claude-launcher'):
             raise SystemExit('Default launcher has no official Claude binary; reinstall Claude Code first.')
         current = native.resolve(strict=True)
     if not (home / '.config/cliproxy-personal/client-key').is_file():
         raise SystemExit('Install the Personal gateway before making it the default.')
     contents = launcher.read_bytes()
     installed.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=installed.parent, delete=False) as temporary:
-        temporary.write(contents)
-        copied = Path(temporary.name)
+    with tempfile.TemporaryDirectory(dir=installed.parent) as directory:
+        copied = Path(directory) / installed.name
+        copied.write_bytes(contents)
         copied.chmod(0o755)
-    copied.replace(installed)
-    for path, target in ((native, current), (personal, installed), (cli, installed)):
-        temporary = path.with_name(path.name + '.next')
-        temporary.symlink_to(target)
-        temporary.replace(path)
+        copied.replace(installed)
+    with tempfile.TemporaryDirectory(dir=cli.parent) as directory:
+        for path, target in ((native, current), (personal, installed), (cli, installed)):
+            temporary = Path(directory) / path.name
+            temporary.symlink_to(target)
+            temporary.replace(path)
     print(f'{cli} defaults to Personal; official binary preserved at {native}.')
 
 

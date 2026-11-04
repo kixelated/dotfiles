@@ -32,7 +32,7 @@ class DefaultTests(unittest.TestCase):
         key.write_text('personal-test-key\n')
 
     def invoke(self, command, env):
-        installed = self.home / '.local/lib/claude-personal'
+        installed = self.home / '.local/lib/claude-launcher'
         program = runpy.run_path(str(installed)) if installed.exists() else launcher
         with patch.dict(os.environ, env, clear=True), patch('pathlib.Path.home', return_value=self.home), \
                 patch('sys.argv', [command, '--setting-sources', '', '--print', 'hello']), \
@@ -42,10 +42,11 @@ class DefaultTests(unittest.TestCase):
 
     def test_default_survives_disabled_settings_and_preserves_the_native_binary(self):
         installer.install(self.home, self.source)
+        (self.home / '.local/bin/claude.next').symlink_to('stale-install')
         installer.install(self.home, self.source)
         installed = self.home / '.local/bin/claude'
         personal = self.home / '.local/bin/claude-personal'
-        self.assertEqual(installed.resolve(), self.home / '.local/lib/claude-personal')
+        self.assertEqual(installed.resolve(), self.home / '.local/lib/claude-launcher')
         self.assertEqual(personal.resolve(), installed.resolve())
         shutil.rmtree(self.source)
         self.assertTrue(installed.is_file())
@@ -57,6 +58,9 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(env['ANTHROPIC_AUTH_TOKEN'], 'personal-test-key')
         self.assertEqual(env['CLAUDE_CONFIG_DIR'], str(self.home / '.claude-personal'))
         self.assertEqual(env['CLAUDE_CODE_OAUTH_TOKEN'], '')
+        _, _, custom = self.invoke('claude', {'CLAUDE_CONFIG_DIR': '/custom-profile'})
+        self.assertEqual(custom['CLAUDE_CONFIG_DIR'], '/custom-profile')
+        self.assertEqual(custom['ANTHROPIC_BASE_URL'], 'http://127.0.0.1:8317')
 
     def test_migrates_checkout_links_even_when_the_checkout_launcher_is_missing(self):
         cli = self.home / '.local/bin/claude'
@@ -66,13 +70,13 @@ class DefaultTests(unittest.TestCase):
         cli.unlink()
         old = self.home / 'old-checkout/bin/claude-personal'
         old.parent.mkdir(parents=True)
-        for exists in (True, False):
-            with self.subTest(checkout_launcher_exists=exists):
+        for exists, relinked in ((True, False), (False, False), (True, True)):
+            with self.subTest(checkout_launcher_exists=exists, personal_relinked=relinked):
                 old.write_text('old launcher')
                 cli.unlink(missing_ok=True)
                 personal.unlink(missing_ok=True)
                 cli.symlink_to(old)
-                personal.symlink_to(old)
+                personal.symlink_to(self.source / 'bin/claude-personal' if relinked else old)
                 if not exists:
                     old.unlink()
                 installer.install(self.home, self.source)
@@ -88,8 +92,10 @@ class DefaultTests(unittest.TestCase):
                     {'ANTHROPIC_API_KEY': 'direct-api-test-key'},
                     {'CLAUDE_CODE_USE_BEDROCK': '1'}):
             with self.subTest(env=env):
-                _, _, actual = self.invoke('claude', env)
-                self.assertEqual(actual, env)
+                for command in ('claude', str((self.home / '.local/bin/claude').resolve())):
+                    with self.subTest(command=command):
+                        _, _, actual = self.invoke(command, env)
+                        self.assertEqual(actual, env)
 
     def test_personal_command_still_overrides_an_explicit_provider(self):
         _, _, env = self.invoke('claude-personal', {'ANTHROPIC_API_KEY': 'api-test-key',
@@ -97,6 +103,19 @@ class DefaultTests(unittest.TestCase):
         self.assertNotIn('CLAUDE_CODE_USE_VERTEX', env)
         self.assertEqual(env['ANTHROPIC_API_KEY'], '')
         self.assertEqual(env['ANTHROPIC_AUTH_TOKEN'], 'personal-test-key')
+
+    def test_personal_uses_the_updated_official_binary_and_reports_a_missing_gateway_key(self):
+        installer.install(self.home, self.source)
+        updated = self.home / 'updated-claude'
+        updated.write_text('updated official binary')
+        cli = self.home / '.local/bin/claude'
+        cli.unlink()
+        cli.symlink_to(updated)
+        executable, _, _ = self.invoke('claude-personal', {})
+        self.assertEqual(Path(executable).resolve(), updated)
+        (self.home / '.config/cliproxy-personal/client-key').unlink()
+        with self.assertRaisesRegex(SystemExit, 'Personal gateway client key missing'):
+            self.invoke('claude-personal', {})
 
     def test_missing_native_binary_refuses_instead_of_recursing(self):
         installer.install(self.home, self.source)

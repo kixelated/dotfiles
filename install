@@ -24,6 +24,9 @@ rm -f ~/.zshenv && ln -s "$DIR/zshenv" ~/.zshenv
 mkdir -p ~/.local/bin
 for f in "$DIR"/bin/*; do
 	[ -f "$f" ] || continue
+	if [ "$(basename "$f")" = claude-personal ] && [ ~/.local/bin/claude-personal -ef ~/.local/lib/claude-launcher ]; then
+		continue
+	fi
 	rm -f ~/.local/bin/"$(basename "$f")" && ln -s "$f" ~/.local/bin/"$(basename "$f")"
 done
 mkdir -p ~/.cargo && rm -f ~/.cargo/config.toml && ln -s "$DIR/cargo/config.toml" ~/.cargo/config.toml
