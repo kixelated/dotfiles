@@ -79,6 +79,8 @@ def main():
     path.chmod(0o600)
     for name in ('claude-personal', 'claude-personal-quota.py'):
         target = home / '.local/bin' / name
+        if name == 'claude-personal' and target.is_file() and target.resolve() == home / '.local/lib/claude-launcher':
+            continue
         if target.is_symlink():
             target.unlink()
         elif target.exists():

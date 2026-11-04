@@ -94,6 +94,9 @@ class QuotaTest(unittest.TestCase):
             config = home / '.config/cliproxy-personal'
             config.mkdir(parents=True)
             (config/'client-key').write_text('test-gateway-key')
+            cli = home / '.local/bin/claude'
+            cli.parent.mkdir(parents=True)
+            cli.write_text('official binary')
             inherited = {'CLAUDE_CODE_USE_BEDROCK': '1', 'CLAUDE_CODE_USE_VERTEX': '1',
                          'CLAUDE_CODE_USE_FOUNDRY': '1', 'CLAUDE_CODE_USE_ANTHROPIC_AWS': '1',
                          'CLAUDE_CODE_OAUTH_TOKEN': 'other-oauth', 'ANTHROPIC_API_KEY': 'other-key'}
