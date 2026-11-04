@@ -283,19 +283,32 @@ class HookTests(unittest.TestCase):
         for name in ('flake.nix', 'flake.lock'):
             with self.subTest(name=name):
                 self.assertEqual(self.run_hook('codex').returncode, 0)
-                original = (self.checkout / name).read_text()
-                (self.checkout / name).write_text(original + '\n')
-                command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
-                env = {**self.env, 'BASH_ENV': str(loader)}
-                first = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
-                self.assertEqual(first.stdout, 'unset')
-                self.assertIn('stale', first.stderr)
-                again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
-                self.assertEqual((again.stdout, again.stderr), ('unset', ''))
-                self.assertEqual(self.run_hook('codex').returncode, 0)
-                refreshed = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
-                self.assertEqual((refreshed.stdout, refreshed.stderr), ("loaded value's", ''))
-                (self.checkout / name).write_text(original)
+                path = self.checkout / name
+                original = path.read_text()
+                timestamps = path.stat()
+                changed = original.replace(' ', '\t', 1)
+                try:
+                    # Content changes must be detected even at identical size and mtime.
+                    path.write_text(changed)
+                    os.utime(path, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+                    command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
+                    env = {**self.env, 'BASH_ENV': str(loader)}
+                    first = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual(first.stdout, 'unset')
+                    self.assertIn('stale', first.stderr)
+                    again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((again.stdout, again.stderr), ('unset', ''))
+                    path.write_text(original)
+                    reverted = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((reverted.stdout, reverted.stderr), ("loaded value's", ''))
+                    path.write_text(changed)
+                    stale_again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertIn('stale', stale_again.stderr)
+                    self.assertEqual(self.run_hook('codex').returncode, 0)
+                    refreshed = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((refreshed.stdout, refreshed.stderr), ("loaded value's", ''))
+                finally:
+                    path.write_text(original)
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_codex_rejects_legacy_snapshots_and_tracks_missing_flakes(self):
@@ -318,6 +331,22 @@ class HookTests(unittest.TestCase):
         added = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
         self.assertEqual(added.stdout, 'unset')
         self.assertIn('stale', added.stderr)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_stale_snapshot_warns_when_marker_is_unwritable(self):
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        (self.checkout / 'flake.lock').write_text('changed\n')
+        directory = self.checkout / '.direnv'
+        directory.chmod(0o555)
+        try:
+            result = subprocess.run(
+                ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"'], cwd=self.checkout,
+                env={**self.env, 'BASH_ENV': str(ROOT / 'codex' / 'bash-env.sh')},
+                capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, 'unset')
+            self.assertIn('stale', result.stderr)
+        finally:
+            directory.chmod(0o755)
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_codex_explicit_nix_shell_wins_and_nested_bash_reloads(self):

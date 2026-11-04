@@ -30,9 +30,13 @@ re-exported.
 
 Codex snapshots carry the Git blob hashes of `flake.nix` and `flake.lock`
 (or `missing` for absent files). The Bash loader ignores an unstamped snapshot
-or one whose hashes no longer match the checkout. It reports the mismatch once
-per capture on stderr; rerun `bin/dev-shell-hook codex` from that checkout to
-refresh it. An explicit `nix develop --command` keeps its own environment:
+or one whose hashes no longer match the checkout. It reports a mismatch on
+stderr once, until a matching load or recapture. Rerun
+`bin/dev-shell-hook codex` from that checkout to refresh it. If the warning marker cannot be written, each shell reports the
+mismatch. The fingerprint covers these two files; edits only to `.envrc` or
+imported Nix files still need a fresh capture.
+
+An explicit `nix develop --command` keeps its own environment:
 when `IN_NIX_SHELL` is set, the loader leaves the snapshot alone.
 
 direnv keys each approval by the `.envrc` path and contents, so every new

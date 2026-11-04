@@ -105,7 +105,9 @@ def main(argv):
             digest = 'missing'
             if (root / name).is_file():
                 result = git(root, 'hash-object', '--no-filters', '--', name)
-                result.check_returncode()
+                if result.returncode != 0:
+                    print(f'dev-shell-hook: could not hash {root / name}: {result.stderr.strip()}', file=sys.stderr)
+                    return 1
                 digest = result.stdout.strip()
             stamp += ' ' + digest
 
