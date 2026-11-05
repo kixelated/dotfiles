@@ -32,3 +32,7 @@
 
 - Prefer the net simpler result: reuse what exists, or narrow the scope, when that makes the implementation or API simpler overall.
 - Don't set arbitrary acceptance criteria.
+
+# Compact instructions
+
+- Forget finished quests.
