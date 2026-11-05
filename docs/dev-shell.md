@@ -1,9 +1,9 @@
 # Agent dev shells
 
-Agents never have to care about Nix. Every Claude Code and Codex session loads
-the checkout's direnv dev shell into its commands through a user-level
-`SessionStart` hook, so repositories need no checked-in hooks to force
-direnv or Nix on contributors.
+Agents never have to care about Nix. Every Claude Code, Codex, and Grok
+session loads the checkout's direnv dev shell into its commands through a
+user-level `SessionStart` hook, so repositories need no checked-in hooks to
+force direnv or Nix on contributors.
 
 `./install` runs `python3 bin/install-dev-shell.py`, which can also run on its
 own. It is idempotent and preserves every other setting and hook:
@@ -12,6 +12,7 @@ own. It is idempotent and preserves every other setting and hook:
 | --- | --- | --- |
 | Claude Code | `SessionStart` in `settings.json` of `~/.claude`, `~/.claude-personal`, and `~/.claude-api-credits` | `$CLAUDE_ENV_FILE` sources a sidecar snapshot |
 | Codex | `SessionStart` in `$CODEX_HOME/hooks.json`, trusted in `config.toml` | `shell_environment_policy.set.BASH_ENV` sources `codex/bash-env.sh`, which loads `<checkout>/.direnv/codex-env.sh` |
+| Grok | `SessionStart` in `$GROK_HOME/hooks/dev-shell.json` | `session.load_envrc` runs `direnv export`, and `shell_environment_policy.set.BASH_ENV` sources `grok/bash-env.sh`, which loads `<checkout>/.direnv/grok-env.sh` |
 
 Codex runs a user hook only after its declaration hash is recorded as trusted.
 The installer asks `codex app-server` for that hash, so it stays correct across
@@ -21,10 +22,11 @@ Codex versions. Rerun the installer after editing the hook command. Without
 ## What the hook does
 
 `bin/dev-shell-hook` does nothing without direnv or an `.envrc` at
-`$CLAUDE_PROJECT_DIR` (Claude) or the Git checkout root (Codex). Otherwise it
-runs `direnv exec` and writes only what the dev shell changes relative to the
-agent's environment. Variables an agent filters out of its commands, such as
-Codex's default secret exclusions, are therefore never re-exported.
+`$CLAUDE_PROJECT_DIR` (Claude) or the Git checkout root (Codex and Grok).
+Otherwise it runs `direnv exec` and writes only what the dev shell changes
+relative to the agent's environment. Variables an agent filters out of its
+commands, such as Codex's default secret exclusions, are therefore never
+re-exported.
 
 direnv keys each approval by the `.envrc` path and contents, so every new
 worktree needs one. The hook runs `direnv allow` itself only when both hold:
@@ -61,6 +63,10 @@ runs there, and the double load is harmless:
 - Codex hooks write the same `.direnv/codex-env.sh` atomically, and either
   snapshot is valid. Codex keys project hook trust by the `hooks.json` path, so
   project hooks in a fresh worktree are untrusted and only the user hook runs.
+- Grok also reads Claude settings, so a repository `.claude/hooks/direnv.sh`
+  runs there too. That script exports through `$CLAUDE_ENV_FILE`, which Grok
+  does not set, so it leaves the environment alone. The user hook is the one
+  that loads the dev shell.
 
 The cost is one extra cached direnv evaluation per session start while both
 hooks exist.
@@ -72,4 +78,5 @@ git -C ~/work/dotfiles pull
 python3 ~/work/dotfiles/bin/install-dev-shell.py
 ```
 
-Start a new Claude Code or Codex session afterwards.
+Start a new Claude Code, Codex, or Grok session afterwards. A session that is
+already running keeps the environment it captured at start.
