@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Merge the default model and reasoning effort into Claude Code and Codex.
 
-Claude Code: `effortLevel`, the Opus auto-compact window, and the Bash tool's
-timeout cap in each profile's settings.json.
+Claude Code: the effort level, the Opus auto-compact window, and the Bash
+tool's timeout cap in each profile's settings.json.
 Codex: `model`, `model_reasoning_effort`, and the auto-compact limit in
 $CODEX_HOME/config.toml,
 written by Codex itself so trust hashes and local settings survive.
@@ -24,6 +24,10 @@ CLAUDE = {
     'env': {'BASH_MAX_TIMEOUT_MS': '3300000'},
     'modelSettings': {'claude-opus-5-5': {'autoCompactWindow': 400000}},
 }
+# Opus 5.5 and later ignore the top-level effortLevel in user settings and read
+# their own modelSettings entry, which `/effort` also saves to, so this fills
+# it only when unset rather than undoing a level picked with `/effort`.
+CLAUDE_IF_UNSET = {'modelSettings': {'claude-opus-5-5': {'effortLevel': 'high'}}}
 # Codex compacts at about half its ~475k window instead of running to ~450k.
 CODEX = {'model': 'gpt-6.1-sol', 'model_reasoning_effort': 'xhigh', 'model_auto_compact_token_limit': 240000}
 
@@ -43,10 +47,22 @@ def merged(settings, defaults):
     return result
 
 
+def defaulted(settings, defaults):
+    """`settings` with the keys of `defaults` it lacks, recursing into objects both have."""
+    result = dict(settings)
+    for key, value in defaults.items():
+        current = result.get(key)
+        if key not in result:
+            result[key] = value
+        elif isinstance(value, dict) and isinstance(current, dict):
+            result[key] = defaulted(current, value)
+    return result
+
+
 def install_claude(path):
-    """Merge CLAUDE into the settings at `path`; return whether it changed."""
+    """Merge CLAUDE and CLAUDE_IF_UNSET into the settings at `path`; return whether it changed."""
     settings = json.loads(path.read_text()) if path.exists() else {}
-    updated = merged(settings, CLAUDE)
+    updated = merged(defaulted(settings, CLAUDE_IF_UNSET), CLAUDE)
     if updated == settings:
         return False
     dev_shell.write_json(path, updated)
