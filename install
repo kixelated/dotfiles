@@ -47,18 +47,34 @@ mise install mr-boxington
 mise exec -- mbx setup --global
 mise exec -- mbx setup --global --status
 
-# Install the manual cleanup service, retire its old automatic timer, and
-# schedule weekly Nix store GC.
+# Install the manual cleanup service, retire its old automatic timer, pull
+# dotfiles hourly, and schedule weekly Nix store GC.
 if [ "$(uname -s)" = Linux ] && command -v systemctl >/dev/null; then
 	if systemctl --user show-environment >/dev/null 2>&1; then
 		"$DIR/bin/install-worktree-clean.sh"
+		systemctl --user link "$DIR/systemd/dotfiles-update.service"
+		systemctl --user enable --now "$DIR/systemd/dotfiles-update.timer"
 		# NixOS hosts collect through nix.gc.automatic instead.
 		if [ ! -e /etc/NIXOS ] && [ -x /nix/var/nix/profiles/default/bin/nix-collect-garbage ]; then
 			systemctl --user link "$DIR/systemd/nix-gc.service"
 			systemctl --user enable --now "$DIR/systemd/nix-gc.timer"
 		fi
 	else
-		echo "Skipping worktree cleanup service: no running systemd user manager"
+		echo "Skipping worktree cleanup and dotfiles update: no running systemd user manager"
+	fi
+fi
+
+# macOS pulls dotfiles hourly through a LaunchAgent, the timer's counterpart.
+# It is reloaded only when its definition changes, since the agent itself may
+# be running this install.
+if [ "$(uname -s)" = Darwin ]; then
+	agent=~/Library/LaunchAgents/dev.kixelated.dotfiles-update.plist
+	mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+	plist=$(sed "s|@HOME@|$HOME|g" "$DIR/launchd/dotfiles-update.plist")
+	if [ "$plist" != "$(cat "$agent" 2>/dev/null)" ]; then
+		launchctl bootout "gui/$(id -u)" "$agent" 2>/dev/null || true
+		printf '%s\n' "$plist" >"$agent"
+		launchctl bootstrap "gui/$(id -u)" "$agent"
 	fi
 fi
 

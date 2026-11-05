@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Pull this dotfiles checkout and rerun ./install when the pull moved it.
+# A systemd user timer (Linux) or LaunchAgent (macOS) runs it hourly; see
+# docs/self-update.md. A pull that cannot fast-forward fails loudly.
+set -euo pipefail
+dir=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
+before=$(git -C "$dir" rev-parse HEAD)
+git -C "$dir" pull --ff-only --quiet
+[ "$(git -C "$dir" rev-parse HEAD)" = "$before" ] && exit 0
+exec "$dir/install"
