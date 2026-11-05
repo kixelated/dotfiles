@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly reclaim of finished agent worktrees
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10min
+Unit=worktree-clean.service
+
+[Install]
+WantedBy=timers.target

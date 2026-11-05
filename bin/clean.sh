@@ -13,8 +13,10 @@ Removes stale git worktrees, then optionally reclaims build output and the Nix
 store. A worktree is removed only when it is registered, unlocked, not the main
 checkout, clean including untracked files, has no process running inside it, and
 either its branch is merged into the base, its HEAD belongs to the history of a verified merged
-PR, or its own branch upstream is gone (detached
-HEADs additionally need their commit reachable from some surviving ref).
+or closed PR, its own branch upstream is gone, or a finished T3, quest, or Claude Code
+owner has released it (detached HEADs additionally need their commit reachable from some
+surviving ref). A finished owner with a dirty checkout keeps the checkout; its managed
+MBX target is still removed when no process is using it. Idle time is not a signal.
 
 options:
   -n, --dry-run   report what would happen and change nothing
@@ -23,7 +25,8 @@ options:
       --targets   also run `cargo clean` on build output in retained checkouts
       --nix       also run `nix store gc` (skipped when a Nix session is live)
       --all       --targets --nix
-      --root DIR  search DIR for repositories (repeatable; default ~/work, /tmp)
+      --root DIR  search DIR for repositories (repeatable; default ~/work, ~/worktrees,
+                  ~/.codex/worktrees, ~/.worktrees, and /tmp)
   -h, --help      this message
 USAGE
 }
@@ -67,7 +70,7 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-[ ${#ROOTS[@]} -gt 0 ] || ROOTS=("$HOME/work" "$HOME/.codex/worktrees" "$HOME/.worktrees" /tmp)
+[ ${#ROOTS[@]} -gt 0 ] || ROOTS=("$HOME/work" "$HOME/worktrees" "$HOME/.codex/worktrees" "$HOME/.worktrees" /tmp)
 
 # Resolve roots, because find does not descend through a symlinked argument and
 # /tmp is one on macOS, which would silently scan nothing.
