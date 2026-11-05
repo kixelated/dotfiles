@@ -201,11 +201,19 @@ class HookTests(unittest.TestCase):
                                 capture_output=True, text=True, check=True)
         return json.loads(result.stdout)['state']['foundRC']['allowed'] == 0
 
+    def bash(self, script, **env):
+        """The output of `bash -c script` in the checkout.
+
+        Stdin is /dev/null, as in Codex and Grok commands: when stdin is a
+        socket, as under some agent harnesses, and SHLVL is below 2, bash
+        assumes sshd started it and runs bashrc instead of BASH_ENV.
+        """
+        return subprocess.run(['bash', '-c', script], cwd=self.checkout, env={**self.env, **env},
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True).stdout
+
     def source(self, script):
         """Variables a fresh bash sees after running `script`."""
-        result = subprocess.run(['bash', '-c', script + '\nprintf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"'],
-                                cwd=self.checkout, env=self.env, capture_output=True, text=True, check=True)
-        return result.stdout
+        return self.bash(script + '\nprintf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"')
 
     def test_noop_without_direnv(self):
         bare = self.root / 'bare-bin'
@@ -252,11 +260,10 @@ class HookTests(unittest.TestCase):
         self.assertEqual(self.source(f'. {loader}'), "loaded value's|kept|unset")
         # Codex's shell snapshot restores its own environment after BASH_ENV
         # runs, then execs the command in an inner bash, which must reload it.
-        wrapped = subprocess.run(
-            ['bash', '-c', 'export DEV_SHELL_TEST=from-codex-snapshot REMOVED=by-envrc\n'
-                           'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\''],
-            cwd=self.checkout, env={**self.env, 'BASH_ENV': str(loader)}, capture_output=True, text=True, check=True)
-        self.assertEqual(wrapped.stdout, "loaded value's|kept|unset")
+        wrapped = self.bash('export DEV_SHELL_TEST=from-codex-snapshot REMOVED=by-envrc\n'
+                            'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\'',
+                            BASH_ENV=str(loader))
+        self.assertEqual(wrapped, "loaded value's|kept|unset")
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_matching_checkout_is_loaded_for_grok(self):
@@ -265,11 +272,10 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.allowed())
         loader = ROOT / 'grok' / 'bash-env.sh'
         self.assertEqual(self.source(f'. {loader}'), "loaded value's|kept|unset")
-        wrapped = subprocess.run(
-            ['bash', '-c', 'export DEV_SHELL_TEST=from-login-snapshot REMOVED=by-envrc\n'
-                           'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\''],
-            cwd=self.checkout, env={**self.env, 'BASH_ENV': str(loader)}, capture_output=True, text=True, check=True)
-        self.assertEqual(wrapped.stdout, "loaded value's|kept|unset")
+        wrapped = self.bash('export DEV_SHELL_TEST=from-login-snapshot REMOVED=by-envrc\n'
+                            'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\'',
+                            BASH_ENV=str(loader))
+        self.assertEqual(wrapped, "loaded value's|kept|unset")
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_changed_reviewed_files_need_a_manual_allow(self):
