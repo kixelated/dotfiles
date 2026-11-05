@@ -109,6 +109,28 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(installer.install_grok(grok_home))
         self.assertEqual(config.read_text(), installed)
 
+    def test_grok_config_the_line_edit_cannot_handle_is_left_alone(self):
+        config = self.home / 'config.toml'
+        bash_env = '/home/me/.grok/bash-env.sh'
+        for original in (
+            # Appending [shell_environment_policy.set] would redefine the inline table.
+            '[shell_environment_policy]\nset = { OTHER = "kept" }\n',
+            # The line edit would rewrite the string and leave the setting unset.
+            '[session]\nnote = """\nload_envrc = false\n"""\n',
+        ):
+            config.write_text(original)
+            with self.assertRaises(SystemExit):
+                installer.update_grok_config(config, bash_env)
+            self.assertEqual(config.read_text(), original)
+
+    def test_grok_config_already_set_under_quoted_keys_is_unchanged(self):
+        config = self.home / 'config.toml'
+        bash_env = '/home/me/.grok/bash-env.sh'
+        original = f'[session]\n"load_envrc" = true\n\n[shell_environment_policy.set]\n"BASH_ENV" = "{bash_env}"\n'
+        config.write_text(original)
+        self.assertFalse(installer.update_grok_config(config, bash_env))
+        self.assertEqual(config.read_text(), original)
+
     @unittest.skipUnless(shutil.which('codex'), 'codex is not installed')
     def test_codex_trusts_the_hook_and_sets_bash_env(self):
         codex_home = self.home / '.codex'

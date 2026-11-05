@@ -12,6 +12,7 @@ Each merge is idempotent and preserves every other setting and hook.
 """
 
 import json
+import tomllib
 import os
 from pathlib import Path
 import re
@@ -167,13 +168,31 @@ def set_assignments(text, updates):
 
 
 def update_grok_config(path, bash_env):
+    """Set Grok's `session.load_envrc` and `BASH_ENV`; return whether it changed.
+
+    The line-based edit cannot handle every TOML form (inline tables, quoted
+    keys, multiline strings), so its result must parse to exactly the original
+    config plus these two values, or nothing is written and install fails.
+    """
     original = path.read_text() if path.exists() else ''
+    expected = tomllib.loads(original)
+    if (expected.get('session', {}).get('load_envrc') is True
+            and expected.get('shell_environment_policy', {}).get('set', {}).get('BASH_ENV') == bash_env):
+        return False
+    expected.setdefault('session', {})['load_envrc'] = True
+    expected.setdefault('shell_environment_policy', {}).setdefault('set', {})['BASH_ENV'] = bash_env
     updated = set_assignments(original, {
         'session': {'load_envrc': 'true'},
         'shell_environment_policy.set': {'BASH_ENV': json.dumps(bash_env)},
     })
-    if updated == original:
-        return False
+    try:
+        actual = tomllib.loads(updated)
+    except tomllib.TOMLDecodeError:
+        actual = None
+    if actual != expected:
+        raise SystemExit(
+            f'{path}: cannot set session.load_envrc = true and shell_environment_policy.set.BASH_ENV = '
+            f'{json.dumps(bash_env)} without changing other settings; set them by hand')
     write_text(path, updated)
     return True
 
