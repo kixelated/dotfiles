@@ -9,7 +9,7 @@
 
 # GitHub
 
-- Every GitHub post you author must end with a `(Written by <model> with <effort>)` line naming the running model by display name.
+- Every GitHub post you author must end with a `(Written by <model> with <effort>)` line naming the running model by display name and its reasoning effort. When the harness doesn't report the effort, write `(Written by <model>)`; never guess it.
 - Ask before posting outside the `kixelated` and `moq-dev` orgs without approval.
 - Pushing to a contributor's fork branch is approved when it's the head of an open PR against a `kixelated` or `moq-dev` repo that allows maintainer edits.
 - Before fixing a failure that also breaks the base branch, search open PRs for an existing fix.
