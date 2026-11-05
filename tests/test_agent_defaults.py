@@ -79,6 +79,7 @@ class InstallerTests(unittest.TestCase):
         config = tomllib.loads(configured)
         self.assertEqual(config['model'], 'gpt-6.1-sol')
         self.assertEqual(config['model_reasoning_effort'], 'xhigh')
+        self.assertEqual(config['model_auto_compact_token_limit'], 240000)
         self.assertEqual(config['approval_policy'], 'on-request')
         self.assertEqual(config['hooks']['state']['/repo/.codex/hooks.json:session_start:0:0'],
                          {'trusted_hash': 'sha256:other'})

@@ -10,6 +10,7 @@ every other setting:
 | Claude Code | `modelSettings.claude-opus-5-5.autoCompactWindow` in the same files | `400000` |
 | Claude Code | `env.BASH_MAX_TIMEOUT_MS` in the same files | `3300000` |
 | Codex | `model` and `model_reasoning_effort` in `$CODEX_HOME/config.toml` | `gpt-6.1-sol`, `xhigh` |
+| Codex | `model_auto_compact_token_limit` in the same file | `240000` |
 
 Codex writes `config.toml` itself through `codex app-server`, so trust hashes and
 other local keys survive. Without `codex` on `PATH`, the Codex part is skipped.
