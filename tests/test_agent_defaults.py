@@ -34,16 +34,31 @@ class InstallerTests(unittest.TestCase):
         path.chmod(0o640)
         self.assertTrue(installer.install_claude(path))
         installed = path.read_text()
-        self.assertEqual(json.loads(installed), {'effortLevel': 'high', 'promptCacheTtl': '1h', 'hooks': hooks})
+        self.assertEqual(json.loads(installed), {**installer.CLAUDE, 'promptCacheTtl': '1h', 'hooks': hooks})
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
 
         self.assertFalse(installer.install_claude(path))
         self.assertEqual(path.read_text(), installed)
 
+    def test_claude_merge_keeps_other_env_and_models(self):
+        path = self.home / '.claude' / 'settings.json'
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            'env': {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317', 'BASH_MAX_TIMEOUT_MS': '3600000'},
+            'modelSettings': {'claude-opus-5-5': {'effortLevel': 'xhigh'}, 'claude-sonnet-5-5': {'autoCompactWindow': 'auto'}},
+        }))
+        self.assertTrue(installer.install_claude(path))
+        settings = json.loads(path.read_text())
+        self.assertEqual(settings['env'], {'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317', 'BASH_MAX_TIMEOUT_MS': '3300000'})
+        self.assertEqual(settings['modelSettings'], {
+            'claude-opus-5-5': {'effortLevel': 'xhigh', 'autoCompactWindow': 400000},
+            'claude-sonnet-5-5': {'autoCompactWindow': 'auto'},
+        })
+
     def test_new_claude_settings_file_is_private(self):
         path = self.home / '.claude-api-credits' / 'settings.json'
         self.assertTrue(installer.install_claude(path))
-        self.assertEqual(json.loads(path.read_text()), {'effortLevel': 'high'})
+        self.assertEqual(json.loads(path.read_text()), installer.CLAUDE)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_codex_is_skipped_without_codex(self):

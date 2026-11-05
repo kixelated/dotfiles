@@ -630,7 +630,7 @@ class InstallTest(unittest.TestCase):
     def test_no_user_manager_skips_service_and_finishes_install(self):
         (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")
         result = self.install()
-        self.assertIn("Skipping worktree cleanup service", result.stdout)
+        self.assertIn("Skipping worktree cleanup and dotfiles update", result.stdout)
         self.assertFalse((Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user").exists())
         self.assertTrue((Path(self.env["HOME"]) / ".codex/bash-env.sh").is_symlink())
         self.assertIn("git submodule update --init --remote", self.log.read_text())

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Merge the default model and reasoning effort into Claude Code and Codex.
 
-Claude Code: `effortLevel` in each profile's settings.json.
+Claude Code: `effortLevel`, the Opus auto-compact window, and the Bash tool's
+timeout cap in each profile's settings.json.
 Codex: `model` and `model_reasoning_effort` in $CODEX_HOME/config.toml,
 written by Codex itself so trust hashes and local settings survive.
 
@@ -14,7 +15,14 @@ import os
 from pathlib import Path
 import shutil
 
-CLAUDE = {'effortLevel': 'high'}
+# The Bash cap sits just under the 1h prompt-cache TTL, so a blocking wait
+# returns before the cache it resumes from expires. It lives in settings, not
+# the shell profile, because sessions T3 Code or launchd start never read one.
+CLAUDE = {
+    'effortLevel': 'high',
+    'env': {'BASH_MAX_TIMEOUT_MS': '3300000'},
+    'modelSettings': {'claude-opus-5-5': {'autoCompactWindow': 400000}},
+}
 CODEX = {'model': 'gpt-6.1-sol', 'model_reasoning_effort': 'xhigh'}
 
 # Reuse the dev shell installer's profile list, atomic writer, and app-server client.
@@ -24,13 +32,22 @@ dev_shell = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dev_shell)
 
 
+def merged(settings, defaults):
+    """`settings` with `defaults` merged in, recursing into objects both have."""
+    result = dict(settings)
+    for key, value in defaults.items():
+        current = result.get(key)
+        result[key] = merged(current, value) if isinstance(value, dict) and isinstance(current, dict) else value
+    return result
+
+
 def install_claude(path):
     """Merge CLAUDE into the settings at `path`; return whether it changed."""
     settings = json.loads(path.read_text()) if path.exists() else {}
-    if all(settings.get(key) == value for key, value in CLAUDE.items()):
+    updated = merged(settings, CLAUDE)
+    if updated == settings:
         return False
-    settings.update(CLAUDE)
-    dev_shell.write_json(path, settings)
+    dev_shell.write_json(path, updated)
     return True
 
 

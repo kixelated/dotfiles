@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull dotfiles and rerun ./install when they changed
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:%h/.cargo/bin:%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin:/run/current-system/sw/bin
+ExecStart=%h/.local/bin/dotfiles-update
+TimeoutStartSec=1h
