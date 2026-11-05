@@ -80,6 +80,35 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((codex_home / 'bash-env.sh').resolve(), ROOT / 'codex' / 'bash-env.sh')
         self.assertFalse((codex_home / 'config.toml').exists())
 
+    def test_grok_install_preserves_config_and_is_idempotent(self):
+        grok_home = self.home / '.grok'
+        config = grok_home / 'config.toml'
+        config.parent.mkdir()
+        config.write_text(
+            '[ui]\ncompact_mode = false\n\n'
+            '[session]\nauto_compact_threshold_percent = 85\nload_envrc = false\n\n'
+            '[shell_environment_policy.set]\nOTHER = "kept"\nBASH_ENV = "/old"\n\n'
+            '[[widgets]]\nload_envrc = false\n')
+        config.chmod(0o640)
+        self.assertTrue(installer.install_grok(grok_home))
+        installed = config.read_text()
+        self.assertIn('compact_mode = false', installed)
+        self.assertIn('auto_compact_threshold_percent = 85', installed)
+        self.assertIn('load_envrc = true', installed)
+        self.assertNotIn('load_envrc = false\n\n[shell', installed)
+        self.assertIn('OTHER = "kept"', installed)
+        self.assertIn(f'BASH_ENV = "{grok_home / "bash-env.sh"}"', installed)
+        # The array table's key is not the session setting.
+        self.assertIn('[[widgets]]\nload_envrc = false\n', installed)
+        hooks = json.loads((grok_home / 'hooks' / 'dev-shell.json').read_text())
+        self.assertEqual(hooks, {'hooks': {'SessionStart': [installer.group('grok')]}})
+        self.assertNotIn('statusMessage', json.dumps(hooks))
+        self.assertEqual((grok_home / 'bash-env.sh').resolve(), ROOT / 'grok' / 'bash-env.sh')
+        self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o640)
+
+        self.assertFalse(installer.install_grok(grok_home))
+        self.assertEqual(config.read_text(), installed)
+
     @unittest.skipUnless(shutil.which('codex'), 'codex is not installed')
     def test_codex_trusts_the_hook_and_sets_bash_env(self):
         codex_home = self.home / '.codex'
@@ -169,6 +198,7 @@ class HookTests(unittest.TestCase):
         (self.checkout / '.envrc').unlink()
         self.assertEqual(self.run_hook().returncode, 0)
         self.assertEqual(self.run_hook('codex').returncode, 0)
+        self.assertEqual(self.run_hook('grok').returncode, 0)
         self.assertEqual(self.env_file.read_text(), '')
         self.assertFalse((self.checkout / '.direnv').exists())
         (self.checkout / '.envrc').write_text('export DEV_SHELL_TEST=1\n')
@@ -202,6 +232,19 @@ class HookTests(unittest.TestCase):
         # runs, then execs the command in an inner bash, which must reload it.
         wrapped = subprocess.run(
             ['bash', '-c', 'export DEV_SHELL_TEST=from-codex-snapshot REMOVED=by-envrc\n'
+                           'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\''],
+            cwd=self.checkout, env={**self.env, 'BASH_ENV': str(loader)}, capture_output=True, text=True, check=True)
+        self.assertEqual(wrapped.stdout, "loaded value's|kept|unset")
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_matching_checkout_is_loaded_for_grok(self):
+        result = self.run_hook('grok', CLAUDE_ENV_FILE=None, CLAUDE_PROJECT_DIR=None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.allowed())
+        loader = ROOT / 'grok' / 'bash-env.sh'
+        self.assertEqual(self.source(f'. {loader}'), "loaded value's|kept|unset")
+        wrapped = subprocess.run(
+            ['bash', '-c', 'export DEV_SHELL_TEST=from-login-snapshot REMOVED=by-envrc\n'
                            'exec bash -c \'printf "%s|%s|%s" "$DEV_SHELL_TEST" "$INHERITED" "${REMOVED-unset}"\''],
             cwd=self.checkout, env={**self.env, 'BASH_ENV': str(loader)}, capture_output=True, text=True, check=True)
         self.assertEqual(wrapped.stdout, "loaded value's|kept|unset")

@@ -4,13 +4,17 @@
 Claude Code: merged into each profile's settings.json.
 Codex: merged into $CODEX_HOME/hooks.json, trusted, and wired to commands
 through BASH_ENV in $CODEX_HOME/config.toml.
+Grok: merged into $GROK_HOME/hooks/dev-shell.json, with session.load_envrc and
+BASH_ENV in $GROK_HOME/config.toml. Grok records an error for statusMessage,
+so that hook omits it.
 
-Both merges are idempotent and preserve every other setting and hook.
+Each merge is idempotent and preserves every other setting and hook.
 """
 
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import stat
@@ -22,7 +26,9 @@ CLAUDE_PROFILES = ('.claude', '.claude-personal', '.claude-api-credits')
 BIN = Path(__file__).resolve().parent
 HOOK = BIN / 'dev-shell-hook'
 BASH_ENV = BIN.parent / 'codex' / 'bash-env.sh'
+GROK_BASH_ENV = BIN.parent / 'grok' / 'bash-env.sh'
 STATUS = 'Loading dev shell'
+ASSIGNMENT = re.compile(r'\s*([A-Za-z0-9_-]+)\s*=')
 
 
 def command(mode):
@@ -30,9 +36,13 @@ def command(mode):
 
 
 def group(mode):
-    hook = {'type': 'command', 'command': command(mode), 'statusMessage': STATUS}
-    if mode == 'claude':
+    hook = {'type': 'command', 'command': command(mode)}
+    # Grok records a load error for statusMessage and still runs the hook.
+    if mode != 'grok':
+        hook['statusMessage'] = STATUS
+    if mode in ('claude', 'grok'):
         # A first Nix build can take minutes; Codex already defaults to 600s.
+        # Grok's observe hooks default to 5s, which kills the load.
         hook['timeout'] = 600
     return {'hooks': [hook]}
 
@@ -66,7 +76,7 @@ def update_json(path, mode):
     return True
 
 
-def write_json(path, settings):
+def write_text(path, text):
     """Atomically replace `path`, keeping its mode (0600 when new)."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     file_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
@@ -74,14 +84,114 @@ def write_json(path, settings):
     try:
         with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as output:
             temporary = Path(output.name)
-            json.dump(settings, output, indent=2)
-            output.write('\n')
+            output.write(text)
             os.fchmod(output.fileno(), file_mode)
         temporary.replace(path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     print(f'Updated {path}')
+
+
+def write_json(path, settings):
+    write_text(path, json.dumps(settings, indent=2) + '\n')
+
+
+def table_name(line):
+    """The table this line opens. Array tables return their raw header so keys under them are left alone."""
+    stripped = line.split('#', 1)[0].strip()
+    if len(stripped) < 3 or stripped[0] != '[' or stripped[-1] != ']':
+        return None
+    if stripped.startswith('[['):
+        return stripped
+    return stripped[1:-1].strip()
+
+
+def assignment_key(line):
+    stripped = line.strip()
+    if not stripped or stripped.startswith('#'):
+        return None
+    match = ASSIGNMENT.match(stripped)
+    return match.group(1) if match else None
+
+
+def set_assignments(text, updates):
+    """Set `updates` (`table` to `{key: toml literal}`) and return the new text.
+
+    Existing keys are replaced in place. Missing keys are inserted at the end
+    of their table. Missing tables are appended. A text that already has the
+    values is returned unchanged.
+    """
+    pending = {table: dict(keys) for table, keys in updates.items()}
+    lines = text.splitlines(keepends=True)
+    out = []
+    current = None
+
+    def flush():
+        keys = pending.pop(current, None)
+        if not keys:
+            return
+        if out and not out[-1].endswith('\n'):
+            out[-1] += '\n'
+        for key, literal in keys.items():
+            out.append(f'{key} = {literal}\n')
+
+    for line in lines:
+        header = table_name(line)
+        if header is not None:
+            flush()
+            current = header
+            out.append(line)
+            continue
+        key = assignment_key(line)
+        if current in pending and key in pending[current]:
+            newline = '\n' if line.endswith('\n') or not line else '\n'
+            out.append(f'{key} = {pending[current].pop(key)}{newline}')
+            if not pending[current]:
+                del pending[current]
+            continue
+        out.append(line)
+    flush()
+    for table, keys in pending.items():
+        if out and not out[-1].endswith('\n'):
+            out[-1] += '\n'
+        if out and out[-1].strip():
+            out.append('\n')
+        out.append(f'[{table}]\n')
+        for key, literal in keys.items():
+            out.append(f'{key} = {literal}\n')
+    updated = ''.join(out)
+    if text and not text.endswith('\n') and updated.endswith('\n') and updated[:-1] == text:
+        return text
+    return updated
+
+
+def update_grok_config(path, bash_env):
+    original = path.read_text() if path.exists() else ''
+    updated = set_assignments(original, {
+        'session': {'load_envrc': 'true'},
+        'shell_environment_policy.set': {'BASH_ENV': json.dumps(bash_env)},
+    })
+    if updated == original:
+        return False
+    write_text(path, updated)
+    return True
+
+
+def install_grok(grok_home):
+    """Point Grok's bash at the dev shell snapshot and load `.envrc` natively.
+
+    `session.load_envrc` makes Grok run `direnv export` for an allowed
+    checkout. The hook allows a fresh worktree when its dev shell files match
+    the remote default branch, and BASH_ENV loads the snapshot the hook wrote.
+    """
+    changed = update_json(grok_home / 'hooks' / 'dev-shell.json', 'grok')
+    link = grok_home / 'bash-env.sh'
+    if not (link.is_symlink() and link.resolve() == GROK_BASH_ENV):
+        link.unlink(missing_ok=True)
+        link.symlink_to(GROK_BASH_ENV)
+        changed = True
+    return update_grok_config(grok_home / 'config.toml', str(link)) or changed
 
 
 class AppServer:
@@ -164,6 +274,7 @@ def main():
     for profile in CLAUDE_PROFILES:
         update_json(home / profile / 'settings.json', 'claude')
     install_codex(Path(os.environ.get('CODEX_HOME') or home / '.codex'))
+    install_grok(Path(os.environ.get('GROK_HOME') or home / '.grok'))
 
 
 if __name__ == '__main__':

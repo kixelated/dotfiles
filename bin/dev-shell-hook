@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Load a checkout's direnv dev shell into Claude Code and Codex commands.
+"""Load a checkout's direnv dev shell into Claude Code, Codex, and Grok commands.
 
 `bin/install-dev-shell.py` installs this as a user-level SessionStart hook, so
 agents get flake-pinned tools (just, cargo, ...) without any repository
-shipping its own hook. Usage: `dev-shell-hook claude` or `dev-shell-hook codex`.
+shipping its own hook. Usage: `dev-shell-hook claude`, `dev-shell-hook codex`,
+or `dev-shell-hook grok`.
 
 It is a no-op without direnv or an `.envrc`. Otherwise it captures what the dev
 shell changes relative to the agent's own environment and writes that diff as a
@@ -14,6 +15,10 @@ sourceable snapshot:
   caps one argv entry at 128KB, so the environment itself stays in the sidecar.
 - codex: `<checkout>/.direnv/codex-env.sh`, which `codex/bash-env.sh` sources
   through BASH_ENV in every Codex shell command.
+- grok: `<checkout>/.direnv/grok-env.sh`, which `grok/bash-env.sh` sources
+  through BASH_ENV in every Grok shell command. Grok also loads an allowed
+  `.envrc` itself when `session.load_envrc` is set; the hook's allow is what
+  makes a fresh worktree eligible.
 
 Only the diff is written, so variables the agent filtered out of its commands
 (Codex drops secrets by default) are never re-exported from the hook's
@@ -54,8 +59,8 @@ DUMP = 'import os, sys; sys.stdout.buffer.write(b"".join(k + b"=" + v + b"\\0" f
 
 
 def main(argv):
-    if len(argv) != 2 or argv[1] not in ('claude', 'codex'):
-        print('usage: dev-shell-hook claude|codex', file=sys.stderr)
+    if len(argv) != 2 or argv[1] not in ('claude', 'codex', 'grok'):
+        print('usage: dev-shell-hook claude|codex|grok', file=sys.stderr)
         return 2
     mode = argv[1]
 
@@ -106,8 +111,9 @@ def main(argv):
             with open(env_file, 'a') as output:
                 output.write('# dev shell (dotfiles dev-shell-hook)\n' + line)
     else:
+        name = {'codex': 'codex-env.sh', 'grok': 'grok-env.sh'}[mode]
         (root / '.direnv').mkdir(exist_ok=True)
-        write_private(root / '.direnv' / 'codex-env.sh', snapshot)
+        write_private(root / '.direnv' / name, snapshot)
     return 0
 
 

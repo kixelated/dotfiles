@@ -73,9 +73,9 @@ ln -s "$DIR/.claude/skills" ~/.claude/skills
 ln -s "$DIR/.claude/CLAUDE.md" ~/.codex/AGENTS.md
 ln -s "$DIR/.claude/skills" ~/.agents/skills
 
-# Every Claude Code and Codex session loads the checkout's direnv dev shell
-# through a user-level SessionStart hook, so repositories need no hooks of their
-# own. See docs/dev-shell.md.
+# Every Claude Code, Codex, and Grok session loads the checkout's direnv dev
+# shell through a user-level SessionStart hook, so repositories need no hooks
+# of their own. See docs/dev-shell.md.
 python3 "$DIR/bin/install-dev-shell.py"
 
 # Default model and reasoning effort for Claude Code and Codex. See
