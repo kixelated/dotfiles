@@ -10,6 +10,11 @@
 		<string>-lc</string>
 		<string>exec @HOME@/.local/bin/dotfiles-update</string>
 	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DOTFILES_UPDATE_AGENT</key>
+		<string>1</string>
+	</dict>
 	<key>StartInterval</key>
 	<integer>3600</integer>
 	<key>StandardOutPath</key>
