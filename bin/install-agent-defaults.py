@@ -3,7 +3,8 @@
 
 Claude Code: `effortLevel`, the Opus auto-compact window, and the Bash tool's
 timeout cap in each profile's settings.json.
-Codex: `model` and `model_reasoning_effort` in $CODEX_HOME/config.toml,
+Codex: `model`, `model_reasoning_effort`, and the auto-compact limit in
+$CODEX_HOME/config.toml,
 written by Codex itself so trust hashes and local settings survive.
 
 Both merges are idempotent and preserve every other setting.
@@ -23,7 +24,8 @@ CLAUDE = {
     'env': {'BASH_MAX_TIMEOUT_MS': '3300000'},
     'modelSettings': {'claude-opus-5-5': {'autoCompactWindow': 400000}},
 }
-CODEX = {'model': 'gpt-6.1-sol', 'model_reasoning_effort': 'xhigh'}
+# Codex compacts at about half its ~475k window instead of running to ~450k.
+CODEX = {'model': 'gpt-6.1-sol', 'model_reasoning_effort': 'xhigh', 'model_auto_compact_token_limit': 240000}
 
 # Reuse the dev shell installer's profile list, atomic writer, and app-server client.
 _spec = importlib.util.spec_from_file_location(
