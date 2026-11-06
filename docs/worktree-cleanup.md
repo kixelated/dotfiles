@@ -54,24 +54,12 @@ refs unchanged. `/tmp` is scanned for registered worktrees only. Age does not
 delete test scratch such as `/tmp/moq-test-*`.
 
 ```sh
-clean.sh --dry-run --archive-local-data
+clean.sh --dry-run
 ```
 
-The public `clean.sh` command and service enable `--archive-local-data` by
-default: ignored drafts, old package configs, and other local files are copied into
-`${XDG_STATE_HOME:-$HOME/.local/state}/worktree-clean/archives/<id>/` before Git
-removes the checkout. Copies preserve symlinks, permissions, and timestamps;
-content hashes and metadata are verified, files/directories are synced, and
-changes during backup preserve the original. Backups are never automatically
-purged. A `target/` directory without a valid Cargo `CACHEDIR.TAG` is archived
-as local data, since older checkouts can contain drafts and scripts there. A failed backup leaves the original intact (and may leave a partial
-backup).
-
-Each completed backup has a `manifest.json` with the original checkout path,
-HEAD, and file fingerprints. To restore, create a checkout at that HEAD,
-initialize its submodules, then copy the contents of the backup's `files/` into
-the checkout, preserving metadata and symlinks. The relative paths also cover
-files inside submodules. Inspect a backup before restoring over existing work.
+Ignored files (drafts, logs, build output) go with the checkout: once its work
+is proven merged, Git removes them with the worktree. Nothing is backed up, so
+keep anything worth saving in a commit or outside the checkout.
 
 Initialized submodules can be retired only after the above checks, using Git's
 single-force worktree removal. Independent nested Git repositories, including

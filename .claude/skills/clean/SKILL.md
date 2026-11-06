@@ -27,7 +27,7 @@ Default roots are the current checkout, `~/.codex/worktrees`, and `~/work/*/.cla
 
 A worktree is removable only when it is registered, unlocked, not the main worktree, clean including untracked files, has no activity signal, and its branch is merged into the base, its own upstream is gone, or its HEAD belongs to the history of a verified merged PR whose merge commit still survives on the actual PR base. Local branch names need not match the PR branch; commits added after the merged PR head remain protected. For detached HEAD, its commit must be reachable from a surviving local branch or tag. Everything else is protected; recency alone proves nothing.
 
-Show a table (path, branch, state, size, intended action) before mutating, and pause for confirmation if scope or activity is uncertain. Use `clean.sh --dry-run` to audit and `clean.sh` to retire eligible worktrees. The command archives and verifies ignored local files before retirement by default, so drafts and logs need not pin a completed checkout; backups remain in the cleaner's state directory. Keep dirty tracked source and untracked files protected. Its helper permits exactly one `--force` for submodule worktrees only after checking files, local-only submodule history, locks and activity. Never add force manually or use double-force; a failed inspection preserves the checkout. Leave missing registrations alone unless their absence is independently verified; a timer cannot distinguish deletion from an unmounted disk.
+Show a table (path, branch, state, size, intended action) before mutating, and pause for confirmation if scope or activity is uncertain. Use `clean.sh --dry-run` to audit and `clean.sh` to retire eligible worktrees. Ignored files (drafts, logs, build output) are removed with a completed checkout and are not backed up. Keep dirty tracked source and untracked files protected. Its helper permits exactly one `--force` for submodule worktrees only after checking files, local-only submodule history, locks and activity. Never add force manually or use double-force; a failed inspection preserves the checkout. Leave missing registrations alone unless their absence is independently verified; a timer cannot distinguish deletion from an unmounted disk.
 
 ## Build artifacts
 
@@ -36,8 +36,7 @@ Build output in a *retained* worktree can still be cleaned, as long as no proces
 Use `just clean` for a finished MoQ checkout: it includes initialized submodule
 build output and MBX-managed targets while preserving source and local state.
 `clean.sh --gc` additionally runs MBX GC with a 25GiB object-cache budget when
-builds and managed targets are idle. The local systemd timer uses this mode. Completed checkouts with ignored local
-state retain that state and their source, but can release idle MBX targets.
+builds and managed targets are idle. The local systemd timer uses this mode.
 
 ## Caches and containers
 

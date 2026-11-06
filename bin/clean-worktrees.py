@@ -3,15 +3,12 @@
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
-import uuid
 from functools import cache
 from pathlib import Path
 
@@ -84,33 +81,6 @@ def modules(repo):
             yield child
 
 
-# Ignored local state is still user data. Only these reproducible directories
-# may accompany a clean checkout into removal.
-ARTIFACTS = {
-    "target",
-    "node_modules",
-    "dist",
-    "build",
-    ".svelte-kit",
-    ".direnv",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".venv",
-    "venv",
-    # wrangler regenerates both; `just clean` in moq.pro sweeps them too.
-    ".wrangler",
-    "worker-configuration.d.ts",
-    ".terraform",
-    # moq.pro: downloaded demo media and the playwright dev-login state.
-    "media",
-    ".auth",
-    "test-results",
-    # Agent scratch by rule (`quest guide`, Workspace): disposable with its worktree.
-    ".tmp",
-}
-
-
 def clean(repo):
     if any(
         line[:1].islower() or line.startswith(b"S ")
@@ -127,143 +97,31 @@ def clean(repo):
         raise Preserve(f"dirty or untracked files in {repo}")
 
 
-def local_data(repo):
-    """Inspect ignored roots once, including nested repos inside build output."""
-    found = []
+def nested_repos(repo):
+    """Protect independent Git repositories hidden among ignored files.
 
-    @cache
-    def cargo_cache(parts):
-        marker = repo.joinpath(*parts, "CACHEDIR.TAG")
-        try:
-            return marker.read_bytes().startswith(
-                b"Signature: 8a477f597d28d172789f06886806bc55"
-            )
-        except (FileNotFoundError, NotADirectoryError):
-            return False
-
-    def artifact(path):
-        for index, part in enumerate(path.parts):
-            if part in ARTIFACTS:
-                # Match Cargo's refusal to delete an unmarked target. Older
-                # agent checkouts contain drafts and helper scripts there.
-                return part != "target" or cargo_cache(path.parts[:index + 1])
-        return path.suffix == ".tsbuildinfo"
-
-    def record(path):
-        if not artifact(path.relative_to(repo)):
-            found.append(path)
-
+    Git deletes ignored files with the worktree. Drafts and build output are
+    disposable once the work is merged, but a nested clone can hold history
+    that exists nowhere else.
+    """
     for raw in git(
         repo, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"
     ).split(b"\0"):
         if not raw:
             continue
         path = Path(os.fsdecode(raw))
-        full = repo / path
         if path.is_absolute() or ".." in path.parts:
             raise Preserve(f"ignored path escapes checkout: {path}")
-        for parent in (full, *full.parents):
-            if parent == repo:
-                break
-            if (
-                parent.name == ".git"
-                or (parent / ".git").exists()
-                or (parent / ".git").is_symlink()
-                or ((parent / "HEAD").is_file() and (parent / "objects").is_dir())
-            ):
-                raise Preserve(f"independent nested Git repository: {parent}")
-            if parent != full and parent.is_symlink():
-                raise Preserve(f"ignored path traverses a symlink: {full}")
+        full = repo / path
         if not full.is_dir() or full.is_symlink():
-            record(full)
             continue
 
         def failed(error):
             raise error
 
-        # Git collapses ignored directories; walk them once without following
-        # links. Inspect directory entries for Git repositories, not every
-        # artifact file's ancestors (which made dependency trees very costly).
         for directory, dirs, files in os.walk(full, followlinks=False, onerror=failed):
-            root = Path(directory)
             if ".git" in dirs or ".git" in files or ("HEAD" in files and "objects" in dirs):
-                raise Preserve(f"independent nested Git repository: {root}")
-            if artifact(root.relative_to(repo)):
-                continue
-            for name in list(dirs):
-                child = root / name
-                if child.is_symlink():
-                    dirs.remove(name)
-                    record(child)
-            for name in files:
-                record(root / name)
-    return sorted(found)
-
-
-def fingerprint(path):
-    info = path.lstat()
-    if path.is_symlink():
-        content = {"symlink": os.readlink(path)}
-    elif path.is_file():
-        with path.open("rb") as stream:
-            content = {"sha256": hashlib.file_digest(stream, "sha256").hexdigest()}
-    else:
-        raise Preserve(f"unsupported local data: {path}")
-    return {
-        **content,
-        "mode": info.st_mode,
-        "size": info.st_size,
-        "mtime_ns": info.st_mtime_ns,
-    }
-
-
-def archive_local_data(wt, paths, dry):
-    """Copy and verify data before Git removes its original checkout."""
-    state = Path(
-        os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
-    ).resolve()
-    destination = state / "worktree-clean/archives" / uuid.uuid4().hex
-    print(f"  archive {len(paths)} local files: {destination}", flush=True)
-    if dry:
-        return {}
-    destination.mkdir(parents=True, mode=0o700)
-    manifest = {"worktree": str(wt), "head": text(wt, "rev-parse", "HEAD"), "files": {}}
-    for source in paths:
-        relative = source.relative_to(wt)
-        before = fingerprint(source)
-        target = destination / "files" / relative
-        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        shutil.copy2(source, target, follow_symlinks=False)
-        if not target.is_symlink():
-            with target.open("rb") as stream:
-                os.fsync(stream.fileno())
-        if fingerprint(source) != before or fingerprint(target) != before:
-            raise Preserve(f"archive verification failed: {source}; kept {destination}")
-        manifest["files"][str(relative)] = before
-    with (destination / "manifest.json").open("x") as stream:
-        json.dump(manifest, stream, indent=2)
-        stream.flush()
-        os.fsync(stream.fileno())
-    # Persist directory entries too; source deletion must not outrun the backup.
-    directories = {destination}
-    parent = destination.parent
-    while parent != state.parent:
-        directories.add(parent)
-        parent = parent.parent
-    for source in paths:
-        parent = (destination / "files" / source.relative_to(wt)).parent
-        while parent != destination:
-            directories.add(parent)
-            parent = parent.parent
-    for directory in sorted(
-        directories, key=lambda path: len(path.parts), reverse=True
-    ):
-        fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    return {wt / path: value for path, value in manifest["files"].items()}
+                raise Preserve(f"independent nested Git repository: {directory}")
 
 
 def ancestor(repo, head, ref):
@@ -765,7 +623,7 @@ def reclaim_finished_target(entry, dry, activity):
     return True
 
 
-def retire(repo, entry, dry, archive=False, activity=None):
+def retire(repo, entry, dry, activity=None):
     wt = Path(entry["worktree"])
     try:
         repos = eligible(repo, entry, activity)
@@ -779,9 +637,9 @@ def retire(repo, entry, dry, archive=False, activity=None):
     if fresh != entry:
         raise Preserve("worktree registration changed during audit")
     eligible(repo, fresh, activity)
-    # Inspect before MBX can remove an artifact directory containing user data.
+    # Inspect before MBX can remove a target that hides a nested repository.
     for root in repos:
-        local_data(root)
+        nested_repos(root)
     targets = workspace_targets(wt)
     protected = [wt, *(target for paths in targets.values() for target in paths)]
     idle(protected, activity)
@@ -795,18 +653,8 @@ def retire(repo, entry, dry, archive=False, activity=None):
         )
         execute(["mbx", "cache", "remove", root], dry)
     eligible(repo, fresh, activity)
-    # Ignored drafts and old package configs are data, not disposable artifacts.
-    paths = sorted(path for root in repos for path in local_data(root))
-    if paths and not archive:
-        raise Preserve(
-            f"ignored local data: {paths[0]} (use --archive-local-data to back up)"
-        )
-    saved = archive_local_data(wt, paths, dry) if paths else {}
-    if saved:
-        eligible(repo, fresh, activity)
-        current = sorted(path for root in repos for path in local_data(root))
-        if current != paths or any(fingerprint(path) != saved[path] for path in paths):
-            raise Preserve("local data changed during archive; backup retained")
+    for root in repos:
+        nested_repos(root)
     # Do not deinit: it mutates shared submodule configuration. Git owns removal
     # of the worktree and its per-worktree module metadata. One force only.
     has_modules = any(
@@ -868,11 +716,6 @@ def main():
     parser.add_argument("-n", "--dry-run", action="store_true")
     parser.add_argument("--root", action="append", type=Path)
     parser.add_argument(
-        "--archive-local-data",
-        action="store_true",
-        help="back up and verify ignored local files before retirement; keep nested repositories",
-    )
-    parser.add_argument(
         "--gc", action="store_true", help="also run MBX GC with a 25GiB object budget"
     )
     args = parser.parse_args()
@@ -922,7 +765,7 @@ def main():
                 wt = entry["worktree"]
                 try:
                     print(f"inspect: {wt}", flush=True)
-                    retire(repo, entry, args.dry_run, args.archive_local_data, activity)
+                    retire(repo, entry, args.dry_run, activity)
                 except Preserve as error:
                     print(f"keep: {wt}: {error}", flush=True)
                 except (
