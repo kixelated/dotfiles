@@ -278,6 +278,123 @@ class HookTests(unittest.TestCase):
         self.assertEqual(wrapped, "loaded value's|kept|unset")
 
     @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_rejects_changed_flakes_until_recaptured(self):
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        for name in ('flake.nix', 'flake.lock'):
+            with self.subTest(name=name):
+                self.assertEqual(self.run_hook('codex').returncode, 0)
+                path = self.checkout / name
+                original = path.read_text()
+                timestamps = path.stat()
+                changed = original.replace(' ', '\t', 1)
+                try:
+                    # Content changes must be detected even at identical size and mtime.
+                    path.write_text(changed)
+                    os.utime(path, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+                    command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
+                    env = {**self.env, 'BASH_ENV': str(loader)}
+                    first = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual(first.stdout, 'unset')
+                    self.assertIn('stale', first.stderr)
+                    again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((again.stdout, again.stderr), ('unset', ''))
+                    path.write_text(original)
+                    reverted = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((reverted.stdout, reverted.stderr), ("loaded value's", ''))
+                    path.write_text(changed)
+                    stale_again = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertIn('stale', stale_again.stderr)
+                    self.assertEqual(self.run_hook('codex').returncode, 0)
+                    refreshed = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+                    self.assertEqual((refreshed.stdout, refreshed.stderr), ("loaded value's", ''))
+                finally:
+                    path.write_text(original)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_keeps_the_snapshot_when_nix_direnv_falls_back(self):
+        # An inherited marker does not count as a fallback.
+        self.assertEqual(self.run_hook('codex', NIX_DIRENV_DID_FALLBACK='1').returncode, 0)
+        snapshot = self.checkout / '.direnv' / 'codex-env.sh'
+        captured = snapshot.read_bytes()
+        stale = Path(str(snapshot) + '.stale')
+        stale.touch()
+        # Emulate nix-direnv reloading its cached profile after evaluation fails.
+        (self.checkout / '.envrc').write_text('export NIX_DIRENV_DID_FALLBACK=1 DEV_SHELL_TEST=cached\n')
+        subprocess.run(['direnv', 'allow', str(self.checkout)], env=self.env, check=True, capture_output=True)
+        result = self.run_hook('codex', NIX_DIRENV_DID_FALLBACK='1')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('fell back', result.stderr)
+        self.assertEqual(snapshot.read_bytes(), captured)
+        self.assertTrue(stale.exists())
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_rejects_legacy_snapshots_and_tracks_missing_flakes(self):
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        directory = self.checkout / '.direnv'
+        directory.mkdir()
+        (directory / 'codex-env.sh').write_text('export DEV_SHELL_TEST=legacy\n')
+        env = {**self.env, 'BASH_ENV': str(loader)}
+        command = ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"']
+        legacy = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual(legacy.stdout, 'unset')
+        self.assertIn('stale', legacy.stderr)
+        subprocess.run(['direnv', 'allow', str(self.checkout)], env=self.env, check=True, capture_output=True)
+        for name in ('flake.nix', 'flake.lock'):
+            (self.checkout / name).unlink()
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        missing = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((missing.stdout, missing.stderr), ("loaded value's", ''))
+        (self.checkout / 'flake.nix').write_text('{ }\n')
+        added = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual(added.stdout, 'unset')
+        self.assertIn('stale', added.stderr)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_stale_snapshot_warns_when_marker_is_unwritable(self):
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        directory = self.checkout / '.direnv'
+        marker = directory / 'codex-env.sh.stale'
+        marker.touch()
+        directory.chmod(0o555)
+        try:
+            matching = subprocess.run(
+                ['bash', '-c', 'printf "%s" "$DEV_SHELL_TEST"'], cwd=self.checkout,
+                env={**self.env, 'BASH_ENV': str(ROOT / 'codex' / 'bash-env.sh')},
+                capture_output=True, text=True, check=True)
+            self.assertEqual((matching.stdout, matching.stderr), ("loaded value's", ''))
+        finally:
+            directory.chmod(0o755)
+        marker.unlink()
+        (self.checkout / 'flake.lock').write_text('changed\n')
+        directory.chmod(0o555)
+        try:
+            result = subprocess.run(
+                ['bash', '-c', 'printf "%s" "${DEV_SHELL_TEST-unset}"'], cwd=self.checkout,
+                env={**self.env, 'BASH_ENV': str(ROOT / 'codex' / 'bash-env.sh')},
+                capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout, 'unset')
+            self.assertIn('stale', result.stderr)
+        finally:
+            directory.chmod(0o755)
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
+    def test_codex_explicit_nix_shell_wins_and_nested_bash_reloads(self):
+        self.assertEqual(self.run_hook('codex').returncode, 0)
+        loader = ROOT / 'codex' / 'bash-env.sh'
+        env = {**self.env, 'BASH_ENV': str(loader), 'IN_NIX_SHELL': 'impure', 'DEV_SHELL_TEST': 'explicit'}
+        command = ['bash', '-c', 'printf "%s" "$DEV_SHELL_TEST"']
+        explicit = subprocess.run(command, cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((explicit.stdout, explicit.stderr), ('explicit', ''))
+        snapshot = self.checkout / '.direnv' / 'codex-env.sh'
+        with snapshot.open('a') as output:
+            output.write('export IN_NIX_SHELL=impure\n')
+        env.pop('IN_NIX_SHELL')
+        nested = subprocess.run(
+            ['bash', '-c', 'export DEV_SHELL_TEST=from-codex-snapshot; exec bash -c \'printf "%s" "$DEV_SHELL_TEST"\''],
+            cwd=self.checkout, env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((nested.stdout, nested.stderr), ("loaded value's", ''))
+
+    @unittest.skipUnless(DIRENV, 'direnv is not installed')
     def test_changed_reviewed_files_need_a_manual_allow(self):
         for name, contents in (('.envrc', 'export DEV_SHELL_TEST=edited\n'), ('flake.lock', '{"version": 8}\n')):
             with self.subTest(name=name):
