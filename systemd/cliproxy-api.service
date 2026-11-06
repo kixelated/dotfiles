@@ -1,0 +1,20 @@
+[Unit]
+Description=Claude API-credit pool gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/cliproxy-api/cli-proxy-api -config %h/.config/cliproxy-api/config.yaml
+WorkingDirectory=%h/.local/share/cliproxy-api
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/cliproxy-api %h/.local/share/cliproxy-api
+
+[Install]
+WantedBy=default.target
