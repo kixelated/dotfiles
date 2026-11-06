@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -287,8 +288,8 @@ def pull_request_evidence(repo):
         return []
     query = """query($owner:String!,$name:String!,$endCursor:String){
       repository(owner:$owner,name:$name){
-        pullRequests(first:100,states:MERGED,after:$endCursor){
-          nodes{headRefName headRefOid baseRefName mergeCommit{oid}}
+        pullRequests(first:100,states:[MERGED, CLOSED],after:$endCursor){
+          nodes{state headRefName headRefOid baseRefName mergeCommit{oid}}
           pageInfo{hasNextPage endCursor}
         }
       }
@@ -348,8 +349,12 @@ def completed_pr_commits(repo):
             if isinstance(pr.get("baseRefName"), str) and pr["baseRefName"]
         }
     )
-    if not refs:
+    if not refs and not any(pr.get("state") == "CLOSED" for pr in prs):
         return frozenset()
+    # An empty ref list must not fall through to `for-each-ref` with no args,
+    # which would list every ref and treat unrelated history as proof.
+    if not refs:
+        return completed_pr_commits_at_bases(repo, ())
     # Key the cache by current base tips: a force-push must invalidate old proof.
     bases = tuple(
         text(repo, "for-each-ref", "--format=%(refname) %(objectname)", *refs).splitlines()
@@ -366,6 +371,11 @@ def completed_pr_commits_at_bases(repo, bases):
     heads = set()
     for pr in merged_pull_requests(repo):
         head = pr.get("headRefOid")
+        # A closed pull request did not land, but its head is abandoned work.
+        if pr.get("state") == "CLOSED":
+            if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40,64}", head):
+                heads.add(head)
+            continue
         merge = pr.get("mergeCommit") or {}
         base = f"refs/remotes/origin/{pr.get('baseRefName', '')}"
         if (
@@ -432,8 +442,225 @@ def completed_branch(repo, entry, head):
     ):
         return
     raise Preserve(
-        "branch has no verified completion (base ancestry, matching merged PR, or gone branch upstream)"
+        "branch has no verified completion (base ancestry, matching merged or closed PR, or gone branch upstream)"
     )
+
+
+# A run that has stopped producing output. Anything else, including an unknown
+# status, means the owner may still use the checkout.
+TERMINAL_RUNS = {"completed", "failed", "cancelled", "interrupted", "rolled_back"}
+
+
+class _Signals:
+    def __init__(self):
+        self.t3 = {}
+        self.t3_ok = True
+        self.quest = {}
+        self.quest_ok = True
+        self.claude = set()
+        self.claude_ok = True
+
+
+_signals = None
+
+
+def reset_agent_signals():
+    global _signals
+    _signals = None
+
+
+def signals():
+    global _signals
+    if _signals is None:
+        _signals = _Signals()
+        _load_signals(_signals)
+    return _signals
+
+
+def _load_signals(loaded):
+    _load_t3(loaded)
+    _load_quest(loaded)
+    _load_claude(loaded)
+
+
+def _load_t3(loaded):
+    """Map each checkout to whether every thread on it is finished.
+
+    A database error leaves the map empty. T3-shaped paths then stay busy.
+    """
+    home = Path(os.environ.get("T3CODE_HOME", Path.home() / ".t3"))
+    database = home / "userdata" / "statev2.sqlite"
+    if not database.is_file():
+        return
+    try:
+        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True, timeout=1)
+        try:
+            connection.execute("pragma query_only=on")
+            threads = connection.execute(
+                "select thread_id, archived_at, deleted_at, payload_json"
+                " from orchestration_v2_projection_threads"
+            ).fetchall()
+            runs = connection.execute(
+                "select thread_id, status from orchestration_v2_projection_runs"
+            ).fetchall()
+            sessions = connection.execute(
+                "select thread_id, status from orchestration_v2_projection_provider_sessions"
+            ).fetchall()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error, ValueError):
+        loaded.t3_ok = False
+        return
+    try:
+        loaded.t3 = _t3_finished(threads, runs, sessions)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        loaded.t3 = {}
+        loaded.t3_ok = False
+
+
+def _t3_finished(threads, runs, sessions):
+    runs_by_thread = {}
+    for thread_id, status in runs:
+        runs_by_thread.setdefault(thread_id, []).append(status)
+    sessions_by_thread = {}
+    for thread_id, status in sessions:
+        sessions_by_thread.setdefault(thread_id, set()).add(status)
+    grouped = {}
+    for thread_id, archived_at, deleted_at, payload_json in threads:
+        payload = json.loads(payload_json)
+        if not isinstance(payload, dict):
+            raise ValueError("thread payload is not an object")
+        raw = payload.get("worktreePath")
+        if not isinstance(raw, str) or not raw:
+            continue
+        resolved = str(Path(raw).resolve())
+        archived = bool(archived_at) or bool(payload.get("archivedAt"))
+        deleted = bool(deleted_at) or bool(payload.get("deletedAt"))
+        grouped.setdefault(resolved, []).append((thread_id, archived or deleted))
+    finished = {}
+    for path, owners in grouped.items():
+        busy = False
+        saw_terminal = False
+        for thread_id, archived in owners:
+            if any(status != "stopped" for status in sessions_by_thread.get(thread_id, ())):
+                busy = True
+            for status in runs_by_thread.get(thread_id, ()):
+                if status in TERMINAL_RUNS:
+                    saw_terminal = True
+                else:
+                    busy = True
+            if archived:
+                saw_terminal = True
+        # No terminal run and no archived thread is a checkout still being created.
+        finished[path] = not busy and saw_terminal
+    return finished
+
+
+def _quest_registry():
+    home = os.environ.get("QUEST_WORKTREE_HOME")
+    if home:
+        return Path(home) / "registry.json"
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return state / "quest" / "worktrees" / "registry.json"
+
+
+def _load_quest(loaded):
+    path = _quest_registry()
+    if not path.is_file():
+        return
+    try:
+        data = json.loads(path.read_text())
+        if (
+            not isinstance(data, dict)
+            or data.get("version") != 1
+            or not isinstance(data.get("records"), list)
+        ):
+            raise ValueError("unsupported quest worktree registry")
+        records = {}
+        for record in data["records"]:
+            if not isinstance(record, dict):
+                raise ValueError("quest record is not an object")
+            raw = record.get("path")
+            runs = record.get("runs")
+            if not isinstance(raw, str) or not raw or not isinstance(runs, list):
+                raise ValueError("quest record is missing a path or runs")
+            resolved = str(Path(raw).resolve())
+            done = record.get("phase") == "released" and not runs
+            # One live record on a shared path keeps the checkout.
+            records[resolved] = done if resolved not in records else records[resolved] and done
+        loaded.quest = records
+    except (OSError, ValueError, json.JSONDecodeError):
+        loaded.quest = {}
+        loaded.quest_ok = False
+
+
+def _load_claude(loaded):
+    root = Path(os.environ.get("CLAUDE_PROJECTS_DIR", Path.home() / ".claude" / "projects"))
+    if not root.exists():
+        return
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        loaded.claude_ok = False
+        return
+    found = set()
+    for child in children:
+        try:
+            if child.is_dir() and any(child.glob("*.jsonl")):
+                found.add(child.name)
+        except OSError:
+            loaded.claude_ok = False
+            return
+    loaded.claude = found
+
+
+def looks_like_t3(path):
+    return path.name.startswith("t3-") and "worktrees" in path.parts
+
+
+def looks_like_claude(path):
+    parts = path.parts
+    return len(parts) >= 3 and parts[-3] == ".claude" and parts[-2] == "worktrees"
+
+
+def looks_like_quest(path):
+    return path.parent.name == ".worktrees"
+
+
+def claude_project_name(path):
+    """Match Claude's project directory: every non-alphanumeric byte becomes '-'."""
+    return "".join(character if character.isalnum() else "-" for character in str(path))
+
+
+def agent_gate(path):
+    """Return finished, busy, or untracked for an agent-owned checkout.
+
+    Untracked means no agent claimed it, so the git completion rules decide.
+    Busy and a failed signal keep the checkout. Idle time is not a signal.
+    """
+    resolved = str(path.resolve())
+    loaded = signals()
+    if not loaded.t3_ok and looks_like_t3(path):
+        return "busy"
+    if resolved in loaded.t3:
+        return "finished" if loaded.t3[resolved] else "busy"
+    if looks_like_t3(path):
+        return "busy"
+    if looks_like_quest(path):
+        if not loaded.quest_ok:
+            return "busy"
+        if resolved in loaded.quest:
+            return "finished" if loaded.quest[resolved] else "busy"
+        return "untracked"
+    if resolved in loaded.quest:
+        return "finished" if loaded.quest[resolved] else "busy"
+    if looks_like_claude(path):
+        if not loaded.claude_ok:
+            return "busy"
+        if claude_project_name(path.resolve()) in loaded.claude:
+            return "finished"
+        return "untracked"
+    return "untracked"
 
 
 def eligible(repo, entry, activity=None):
@@ -442,13 +669,16 @@ def eligible(repo, entry, activity=None):
         raise Preserve("locked, missing or prunable")
     if wt.is_symlink() or wt.resolve() != wt:
         raise Preserve("noncanonical worktree path")
+    gate = agent_gate(wt)
+    if gate == "busy":
+        raise Preserve("agent checkout is not finished")
     head = text(wt, "rev-parse", "HEAD")
     if "branch" not in entry:
         if not text(
             repo, "for-each-ref", f"--contains={head}", "refs/heads", "refs/tags"
         ):
             raise Preserve("detached commit has no surviving local branch or tag")
-    else:
+    elif gate != "finished":
         completed_branch(repo, entry, head)
     clean(wt)
     repos = [wt, *modules(wt)]
@@ -509,9 +739,41 @@ def workspace_targets(root):
     return found
 
 
+def reclaim_finished_target(entry, dry, activity):
+    """Release managed build output when the checkout itself must stay.
+
+    The checkout stays dirty, locked, or mid-removal. The target goes only
+    when the owner is finished and no process is using the checkout or target.
+    """
+    wt = Path(entry["worktree"])
+    if "locked" in entry or agent_gate(wt) != "finished":
+        return False
+    try:
+        targets = workspace_targets(wt)
+    except (OSError, Preserve, subprocess.CalledProcessError, json.JSONDecodeError):
+        return False
+    if not targets:
+        return False
+    protected = [wt, *(target for paths in targets.values() for target in paths)]
+    try:
+        idle(protected, activity if dry else None)
+    except Preserve:
+        return False
+    for root in sorted(targets, key=lambda path: len(path.parts), reverse=True):
+        execute(["mbx", "cache", "remove", root], dry)
+    print(f"reclaimed target: {wt}", flush=True)
+    return True
+
+
 def retire(repo, entry, dry, archive=False, activity=None):
     wt = Path(entry["worktree"])
-    repos = eligible(repo, entry, activity)
+    try:
+        repos = eligible(repo, entry, activity)
+    except Preserve as error:
+        if reclaim_finished_target(entry, dry, activity):
+            print(f"kept checkout: {wt}: {error}", flush=True)
+            return
+        raise
     # Refresh the lock and status after the audit, before releasing cache claims.
     fresh = next(item for item in worktrees(repo) if item["worktree"] == str(wt))
     if fresh != entry:
@@ -561,6 +823,17 @@ def retire(repo, entry, dry, archive=False, activity=None):
         activity if dry else None,
     )
     execute([*command, wt], dry)
+
+
+def default_roots():
+    home = Path.home()
+    return [
+        home / "work",
+        home / "worktrees",
+        home / ".codex/worktrees",
+        home / ".worktrees",
+        Path("/tmp"),
+    ]
 
 
 def repositories(roots):
@@ -617,12 +890,7 @@ def main():
             processes()
         )  # Never interpret a sandbox's partial view as inactivity.
         failures = False
-        roots = args.root or [
-            Path.home() / "work",
-            Path.home() / ".codex/worktrees",
-            Path.home() / ".worktrees",
-            Path("/tmp"),
-        ]
+        roots = args.root or default_roots()
         for repo in repositories([root.resolve() for root in roots]):
             entries = list(worktrees(repo))
             if len(entries) > 1 and "origin" in text(repo, "remote").splitlines():

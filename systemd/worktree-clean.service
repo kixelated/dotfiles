@@ -6,7 +6,7 @@ Type=oneshot
 WorkingDirectory=%h
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:%h/.cargo/bin:%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin:/run/current-system/sw/bin
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=%h/.local/bin/clean.sh --gc --archive-local-data --root %h/work --root %h/.codex/worktrees --root %h/.worktrees --root /tmp
+ExecStart=%h/.local/bin/clean.sh --gc --archive-local-data --root %h/work --root %h/worktrees --root %h/.codex/worktrees --root %h/.worktrees --root /tmp
 Nice=19
 IOSchedulingClass=idle
 TimeoutStartSec=2h

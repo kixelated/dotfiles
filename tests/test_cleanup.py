@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,17 @@ class CleanupTest(unittest.TestCase):
         patch.object(cleanup, "builders_idle").start()
         patch.object(cleanup, "workspace_targets", return_value={}).start()
         patch.object(cleanup, "merged_pull_requests", return_value=[]).start()
-        patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")}).start()
+        patch.dict(
+            os.environ,
+            {
+                "XDG_STATE_HOME": str(self.root / "state"),
+                "T3CODE_HOME": str(self.root / "t3"),
+                "QUEST_WORKTREE_HOME": str(self.root / "questwt"),
+                "CLAUDE_PROJECTS_DIR": str(self.root / "claude-projects"),
+            },
+        ).start()
+        cleanup.reset_agent_signals()
+        self.addCleanup(cleanup.reset_agent_signals)
         self.executed = []
         original = cleanup.execute
 
@@ -56,6 +67,87 @@ class CleanupTest(unittest.TestCase):
 
     def retire(self, dry=False, archive=False):
         cleanup.retire(self.repo, self.entry(), dry, archive)
+
+    def origin_main(self):
+        self.git(self.repo, "remote", "add", "origin", "https://github.com/kixelated/test.git")
+        head = self.git(self.repo, "rev-parse", "HEAD").decode().strip()
+        self.git(self.repo, "update-ref", "refs/remotes/origin/main", head)
+
+    def linked(self, path, branch):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.git(self.repo, "worktree", "add", "-qb", branch, str(path))
+        return path
+
+    def retire_path(self, path):
+        entry = next(item for item in cleanup.worktrees(self.repo) if item["worktree"] == str(path))
+        cleanup.retire(self.repo, entry, False, False)
+
+    def mark_t3(self, worktree=None, run="completed", session="stopped", archived=None):
+        worktree = Path(worktree or self.wt).resolve()
+        home = self.root / "t3" / "userdata"
+        home.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(home / "statev2.sqlite")
+        connection.executescript(
+            """
+            create table if not exists orchestration_v2_projection_threads (
+                thread_id text primary key,
+                archived_at text,
+                deleted_at text,
+                payload_json text not null
+            );
+            create table if not exists orchestration_v2_projection_runs (
+                thread_id text,
+                status text,
+                requested_at text
+            );
+            create table if not exists orchestration_v2_projection_provider_sessions (
+                thread_id text,
+                status text
+            );
+            delete from orchestration_v2_projection_threads;
+            delete from orchestration_v2_projection_runs;
+            delete from orchestration_v2_projection_provider_sessions;
+            """
+        )
+        connection.execute(
+            "insert into orchestration_v2_projection_threads values (?,?,?,?)",
+            (
+                "thread-1",
+                "2026-11-05T00:00:00Z" if archived else None,
+                None,
+                json.dumps({"worktreePath": str(worktree)}),
+            ),
+        )
+        if run is not None:
+            connection.execute(
+                "insert into orchestration_v2_projection_runs values (?,?,?)",
+                ("thread-1", run, "2026-11-05T00:00:00Z"),
+            )
+        if session is not None:
+            connection.execute(
+                "insert into orchestration_v2_projection_provider_sessions values (?,?)",
+                ("thread-1", session),
+            )
+        connection.commit()
+        connection.close()
+        cleanup.reset_agent_signals()
+
+    def write_quest(self, path, phase, runs):
+        registry = self.root / "questwt"
+        registry.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "capacity": 0,
+            "records": [
+                {
+                    "path": str(Path(path).resolve()),
+                    "phase": phase,
+                    "runs": runs,
+                }
+            ],
+        }
+        (registry / "registry.json").write_text(json.dumps(payload))
+        cleanup.reset_agent_signals()
 
     def ignored(self, pattern, path, content="local"):
         self.git(self.wt, "config", "core.excludesFile", str(self.root / "ignore"))
@@ -324,11 +416,220 @@ class CleanupTest(unittest.TestCase):
             self.retire()
         self.assertEqual(self.executed, [])
 
-    def test_unmerged_or_closed_pr_preserved(self):
+    def test_unmerged_pr_preserved(self):
         self.feature()
         with self.assertRaisesRegex(cleanup.Preserve, "no verified completion"):
             self.retire()
         self.assertEqual(self.executed, [])
+
+    def test_closed_pr_head_is_complete(self):
+        pr = self.feature()
+        pr["state"] = "CLOSED"
+        parent = self.git(self.repo, "rev-parse", "HEAD^").decode().strip()
+        self.git(self.repo, "update-ref", "refs/remotes/origin/main", parent)
+        with patch.object(cleanup, "merged_pull_requests", return_value=[pr]):
+            self.retire()
+        self.assertFalse(self.wt.exists())
+        self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/feature"))
+
+    def test_running_t3_thread_preserves_checkout(self):
+        self.origin_main()
+        self.git(self.wt, "checkout", "-qb", "t3/running")
+        self.mark_t3(run="running", session="ready")
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire()
+        self.assertTrue(self.wt.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_ready_session_preserves_completed_run(self):
+        self.origin_main()
+        self.git(self.wt, "checkout", "-qb", "t3/ready")
+        self.mark_t3(run="completed", session="ready")
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_sibling_running_thread_keeps_shared_checkout(self):
+        self.origin_main()
+        self.git(self.wt, "checkout", "-qb", "t3/shared")
+        self.mark_t3(run="completed", session="stopped")
+        connection = sqlite3.connect(self.root / "t3/userdata/statev2.sqlite")
+        connection.execute(
+            "insert into orchestration_v2_projection_threads values (?,?,?,?)",
+            ("thread-2", None, None, json.dumps({"worktreePath": str(self.wt.resolve())})),
+        )
+        connection.execute(
+            "insert into orchestration_v2_projection_runs values (?,?,?)",
+            ("thread-2", "running", "2026-11-05T01:00:00Z"),
+        )
+        connection.execute(
+            "insert into orchestration_v2_projection_provider_sessions values (?,?)",
+            ("thread-2", "ready"),
+        )
+        connection.commit()
+        connection.close()
+        cleanup.reset_agent_signals()
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire()
+        self.assertEqual(self.executed, [])
+
+    def test_finished_t3_thread_reclaims_unmerged_checkout(self):
+        self.git(self.wt, "checkout", "-qb", "t3/done")
+        self.git(self.wt, "commit", "-qm", "unique", "--allow-empty")
+        self.mark_t3()
+        self.retire()
+        self.assertFalse(self.wt.exists())
+        self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/t3/done"))
+
+    def test_archived_t3_thread_without_a_run_is_finished(self):
+        self.git(self.wt, "checkout", "-qb", "t3/archived")
+        self.git(self.wt, "commit", "-qm", "unique", "--allow-empty")
+        self.mark_t3(run=None, session=None, archived=True)
+        self.retire()
+        self.assertFalse(self.wt.exists())
+
+    def test_finished_detached_unique_commit_stays(self):
+        self.git(self.wt, "commit", "-qm", "unique", "--allow-empty")
+        self.mark_t3()
+        with self.assertRaisesRegex(cleanup.Preserve, "detached commit"):
+            self.retire()
+        self.assertTrue(self.wt.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_unlisted_t3_worktree_stays(self):
+        self.origin_main()
+        path = self.linked(self.root / "worktrees" / "moq" / "t3-deadbeef", "t3/unknown")
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire_path(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_corrupt_t3_database_preserves_t3_checkout(self):
+        self.origin_main()
+        path = self.linked(self.root / "worktrees" / "moq" / "t3-corrupt", "t3/corrupt")
+        home = self.root / "t3" / "userdata"
+        home.mkdir(parents=True)
+        (home / "statev2.sqlite").write_text("not a database")
+        cleanup.reset_agent_signals()
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire_path(path)
+        self.assertEqual(self.executed, [])
+
+    def test_finished_dirty_checkout_reclaims_target_only(self):
+        self.git(self.wt, "checkout", "-qb", "t3/dirty")
+        self.git(self.wt, "commit", "-qm", "unique", "--allow-empty")
+        (self.wt / "notes").write_text("untracked")
+        target = self.root / "managed-target"
+        target.mkdir()
+        self.mark_t3()
+        with patch.object(cleanup, "workspace_targets", return_value={self.wt: [target]}):
+            self.retire()
+        self.assertTrue(self.wt.exists())
+        self.assertIn(["mbx", "cache", "remove", str(self.wt)], self.executed)
+        self.assertFalse(any(command[0] == "git" for command in self.executed))
+
+    def test_finished_dirty_checkout_keeps_live_target(self):
+        self.git(self.wt, "checkout", "-qb", "t3/live")
+        self.git(self.wt, "commit", "-qm", "unique", "--allow-empty")
+        (self.wt / "notes").write_text("untracked")
+        target = self.root / "managed-target"
+        target.mkdir()
+        self.mark_t3()
+        with (
+            patch.object(cleanup, "workspace_targets", return_value={self.wt: [target]}),
+            patch.object(cleanup, "processes", return_value=[target / "binary"]),
+            self.assertRaises(cleanup.Preserve),
+        ):
+            self.retire()
+        self.assertTrue(self.wt.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_claude_transcript_reclaims_worktree(self):
+        path = self.linked(self.root / ".claude" / "worktrees" / "agent-1", "claude-agent")
+        self.git(path, "commit", "-qm", "unique", "--allow-empty")
+        encoded = cleanup.claude_project_name(path.resolve())
+        folder = self.root / "claude-projects" / encoded
+        folder.mkdir(parents=True)
+        (folder / "session.jsonl").write_text("{}\n")
+        cleanup.reset_agent_signals()
+        self.retire_path(path)
+        self.assertFalse(path.exists())
+        self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/claude-agent"))
+
+    def test_claude_without_transcript_stays(self):
+        path = self.linked(self.root / ".claude" / "worktrees" / "agent-2", "claude-open")
+        self.git(path, "commit", "-qm", "unique", "--allow-empty")
+        with self.assertRaisesRegex(cleanup.Preserve, "no verified completion"):
+            self.retire_path(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_claude_project_name_matches_transcript_dir(self):
+        path = Path("/home/kixelated/work/moq/.claude/worktrees/agent-ade228f6150094e97")
+        self.assertEqual(
+            cleanup.claude_project_name(path),
+            "-home-kixelated-work-moq--claude-worktrees-agent-ade228f6150094e97",
+        )
+
+    def test_quest_released_reclaims_unmerged_checkout(self):
+        path = self.linked(self.root / "src" / ".worktrees" / "agent", "quest-agent")
+        self.git(path, "commit", "-qm", "unique", "--allow-empty")
+        self.write_quest(path, "released", [])
+        self.retire_path(path)
+        self.assertFalse(path.exists())
+        self.assertTrue(self.git(self.repo, "rev-parse", "refs/heads/quest-agent"))
+
+    def test_active_quest_on_main_stays(self):
+        self.origin_main()
+        path = self.linked(self.root / "src" / ".worktrees" / "live", "quest-live")
+        self.write_quest(path, "active", [])
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire_path(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_released_quest_with_a_run_stays(self):
+        self.origin_main()
+        path = self.linked(self.root / "src" / ".worktrees" / "running", "quest-running")
+        self.write_quest(path, "released", [{"unit": "build"}])
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire_path(path)
+        self.assertEqual(self.executed, [])
+
+    def test_released_quest_with_live_process_stays(self):
+        path = self.linked(self.root / "src" / ".worktrees" / "busy", "quest-busy")
+        self.git(path, "commit", "-qm", "unique", "--allow-empty")
+        self.write_quest(path, "released", [])
+        with (
+            patch.object(cleanup, "processes", return_value=[path / "binary"]),
+            self.assertRaisesRegex(cleanup.Preserve, "active process"),
+        ):
+            self.retire_path(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(self.executed, [])
+
+    def test_corrupt_quest_registry_preserves_checkout(self):
+        self.origin_main()
+        path = self.linked(self.root / "src" / ".worktrees" / "broken", "quest-broken")
+        registry = self.root / "questwt"
+        registry.mkdir()
+        (registry / "registry.json").write_text("not json")
+        cleanup.reset_agent_signals()
+        with self.assertRaisesRegex(cleanup.Preserve, "not finished"):
+            self.retire_path(path)
+        self.assertEqual(self.executed, [])
+
+    def test_default_roots_cover_agent_checkouts(self):
+        roots = cleanup.default_roots()
+        self.assertIn(Path.home() / "worktrees", roots)
+        self.assertIn(Path.home() / "work", roots)
+        self.assertIn(Path("/tmp"), roots)
+
+    def test_cleanup_timer_is_hourly(self):
+        timer = Path(__file__).resolve().parents[1] / "systemd/worktree-clean.timer"
+        text = timer.read_text()
+        self.assertIn("OnCalendar=hourly", text)
+        self.assertIn("Persistent=true", text)
 
     def test_merge_no_longer_on_base_preserved(self):
         pr = self.feature()
@@ -599,7 +900,7 @@ class InstallTest(unittest.TestCase):
             text=True,
         )
 
-    def test_full_install_keeps_cleanup_manual_and_is_repeatable(self):
+    def test_full_install_enables_hourly_timer_and_is_repeatable(self):
         for _ in range(2):
             self.install()
         units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
@@ -607,25 +908,35 @@ class InstallTest(unittest.TestCase):
             (units / "worktree-clean.service").resolve(),
             self.repo / "systemd/worktree-clean.service",
         )
-        self.assertFalse((units / "worktree-clean.timer").exists())
+        self.assertEqual(
+            (units / "worktree-clean.timer").resolve(),
+            self.repo / "systemd/worktree-clean.timer",
+        )
         self.assertEqual(
             (Path(self.env["HOME"]) / ".local/bin/clean-worktrees.py").resolve(),
             self.repo / "bin/clean-worktrees.py",
         )
         calls = self.log.read_text().splitlines()
         self.assertEqual(calls.count("systemctl --user daemon-reload"), 2)
-        self.assertFalse(any("enable --now" in call and "worktree-clean" in call for call in calls))
+        enabled = [
+            call for call in calls if "enable --now" in call and "worktree-clean.timer" in call
+        ]
+        self.assertEqual(len(enabled), 2)
 
-    def test_install_removes_dangling_legacy_timer(self):
+    def test_install_replaces_dangling_legacy_timer(self):
         units = Path(self.env["XDG_CONFIG_HOME"]) / "systemd/user"
         (units / "timers.target.wants").mkdir(parents=True)
-        missing = self.repo / "systemd/worktree-clean.timer"
-        (units / "worktree-clean.timer").symlink_to(missing)
-        (units / "timers.target.wants/worktree-clean.timer").symlink_to(missing)
+        dangling = self.root / "missing-timer"
+        (units / "worktree-clean.timer").symlink_to(dangling)
+        (units / "timers.target.wants/worktree-clean.timer").symlink_to(dangling)
         self.install()
-        self.assertFalse((units / "worktree-clean.timer").is_symlink())
-        self.assertFalse((units / "timers.target.wants/worktree-clean.timer").is_symlink())
+        self.assertEqual(
+            (units / "worktree-clean.timer").resolve(),
+            self.repo / "systemd/worktree-clean.timer",
+        )
+        self.assertFalse((units / "timers.target.wants/worktree-clean.timer").exists())
         self.assertIn("systemctl --user stop worktree-clean.timer", self.log.read_text())
+        self.assertIn("systemctl --user enable --now worktree-clean.timer", self.log.read_text())
 
     def test_no_user_manager_skips_service_and_finishes_install(self):
         (self.commands / "systemctl").write_text("#!/bin/sh\nexit 1\n")
