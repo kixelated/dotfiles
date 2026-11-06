@@ -21,7 +21,6 @@ MBX target is still removed when no process is using it. Idle time is not a sign
 options:
   -n, --dry-run   report what would happen and change nothing
       --gc        also collect MBX storage with a 25GiB object budget
-      --archive-local-data  back up ignored local files before retirement (default)
       --targets   also run `cargo clean` on build output in retained checkouts
       --nix       also run `nix store gc` (skipped when a Nix session is live)
       --all       --targets --nix
@@ -35,7 +34,6 @@ DRY_RUN=0
 DO_TARGETS=0
 DO_NIX=0
 DO_GC=0
-ARCHIVE_LOCAL_DATA=1
 ROOTS=()
 
 while [ $# -gt 0 ]; do
@@ -43,7 +41,6 @@ while [ $# -gt 0 ]; do
 	-n | --dry-run) DRY_RUN=1 ;;
 	--targets) DO_TARGETS=1 ;;
 	--gc) DO_GC=1 ;;
-	--archive-local-data) ARCHIVE_LOCAL_DATA=1 ;;
 	--nix) DO_NIX=1 ;;
 	--all)
 		DO_TARGETS=1
@@ -131,7 +128,6 @@ script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 args=()
 [ "$DRY_RUN" = 0 ] || args+=(--dry-run)
 [ "$DO_GC" = 0 ] || args+=(--gc)
-[ "$ARCHIVE_LOCAL_DATA" = 0 ] || args+=(--archive-local-data)
 for root in "${ROOTS[@]}"; do args+=(--root "$root"); done
 python3 "$script_dir/clean-worktrees.py" "${args[@]}"
 

@@ -65,8 +65,8 @@ class CleanupTest(unittest.TestCase):
     def entry(self):
         return list(cleanup.worktrees(self.repo))[1]
 
-    def retire(self, dry=False, archive=False):
-        cleanup.retire(self.repo, self.entry(), dry, archive)
+    def retire(self, dry=False):
+        cleanup.retire(self.repo, self.entry(), dry)
 
     def origin_main(self):
         self.git(self.repo, "remote", "add", "origin", "https://github.com/kixelated/test.git")
@@ -80,7 +80,7 @@ class CleanupTest(unittest.TestCase):
 
     def retire_path(self, path):
         entry = next(item for item in cleanup.worktrees(self.repo) if item["worktree"] == str(path))
-        cleanup.retire(self.repo, entry, False, False)
+        cleanup.retire(self.repo, entry, False)
 
     def mark_t3(self, worktree=None, run="completed", session="stopped", archived=None):
         worktree = Path(worktree or self.wt).resolve()
@@ -344,17 +344,21 @@ class CleanupTest(unittest.TestCase):
         self.retire(dry=True)
         self.assertTrue(self.wt.exists())
 
-    def test_ignored_local_state_preserved(self):
-        self.git(self.wt, "config", "core.excludesFile", str(self.root / "ignore"))
-        (self.root / "ignore").write_text(".env\n")
-        (self.wt / ".env").write_text("local")
-        with self.assertRaisesRegex(cleanup.Preserve, "ignored local data"):
-            self.retire()
-        self.assertTrue((self.wt / ".env").exists())
+    def test_ignored_local_state_removed_with_worktree(self):
+        self.ignored(".env", ".env")
+        self.retire()
+        self.assertFalse(self.wt.exists())
         self.assertTrue(
             any(command[:3] == ["mbx", "cache", "remove"] for command in self.executed)
         )
-        self.assertFalse(any(command[0] == "git" for command in self.executed))
+
+    def test_ignored_submodule_state_removed_with_worktree(self):
+        module = self.module()
+        (self.root / "ignore").write_text(".env\n")
+        self.git(module, "config", "core.excludesFile", str(self.root / "ignore"))
+        (module / ".env").write_text("submodule state")
+        self.retire()
+        self.assertFalse(self.wt.exists())
 
     def test_squash_merge_with_inherited_upstream(self):
         pr = self.feature()
@@ -670,116 +674,24 @@ class CleanupTest(unittest.TestCase):
             self.retire()
         self.assertEqual(self.executed, [])
 
-    def test_local_data_archived_and_verified_before_removal(self):
-        source = self.ignored("doc/draft/", "doc/draft/idea.md", "irreplaceable draft")
-        source.chmod(0o600)
-        expected = cleanup.fingerprint(source)
-        self.retire(archive=True)
-        self.assertFalse(self.wt.exists())
-        archives = list((self.root / "state/worktree-clean/archives").iterdir())
-        self.assertEqual(len(archives), 1)
-        manifest = json.loads((archives[0] / "manifest.json").read_text())
-        self.assertEqual(manifest["worktree"], str(self.wt))
-        self.assertEqual(manifest["files"]["doc/draft/idea.md"], expected)
-        self.assertEqual(
-            cleanup.fingerprint(archives[0] / "files/doc/draft/idea.md"), expected
-        )
-
-    def test_ignored_submodule_data_archived(self):
-        module = self.module()
-        (self.root / "ignore").write_text(".env\n")
-        self.git(module, "config", "core.excludesFile", str(self.root / "ignore"))
-        (module / ".env").write_text("submodule state")
-        self.retire(archive=True)
-        backups = list(
-            (self.root / "state/worktree-clean/archives").glob("*/files/moq/.env")
-        )
-        self.assertEqual(backups[0].read_text(), "submodule state")
-
-    def test_archive_symlink_preserves_link_without_following(self):
-        link = self.ignored(".env", ".env")
-        link.unlink()
-        link.symlink_to("/not/a/real/secret")
-        self.retire(archive=True)
-        backup = next(
-            (self.root / "state/worktree-clean/archives").glob("*/files/.env")
-        )
-        self.assertEqual(os.readlink(backup), "/not/a/real/secret")
-
-    def test_archive_copy_failure_keeps_original(self):
-        source = self.ignored(".env", ".env")
-        with (
-            patch.object(cleanup.shutil, "copy2", side_effect=OSError("disk full")),
-            self.assertRaises(OSError),
-        ):
-            self.retire(archive=True)
-        self.assertEqual(source.read_text(), "local")
-        self.assertFalse(any(command[0] == "git" for command in self.executed))
-
-    def test_archive_corruption_keeps_original(self):
-        source = self.ignored(".env", ".env")
-
-        def corrupt(source, target, **kwargs):
-            target.write_text("corrupt")
-
-        with (
-            patch.object(cleanup.shutil, "copy2", side_effect=corrupt),
-            self.assertRaisesRegex(cleanup.Preserve, "verification failed"),
-        ):
-            self.retire(archive=True)
-        self.assertEqual(source.read_text(), "local")
-
-    def test_source_change_after_archive_keeps_worktree(self):
-        source = self.ignored(".env", ".env")
-        original = cleanup.archive_local_data
-
-        def archive(*args):
-            saved = original(*args)
-            source.write_text("new local work")
-            return saved
-
-        with (
-            patch.object(cleanup, "archive_local_data", side_effect=archive),
-            self.assertRaisesRegex(cleanup.Preserve, "changed during archive"),
-        ):
-            self.retire(archive=True)
-        self.assertEqual(source.read_text(), "new local work")
-
-    def test_archive_dry_run_does_not_write_backups(self):
-        self.ignored(".env", ".env")
-        self.retire(dry=True, archive=True)
-        self.assertTrue(self.wt.exists())
-        self.assertFalse((self.root / "state").exists())
-
     def test_independent_nested_repository_inside_artifact_preserved(self):
         source = self.ignored("target/", "target/nested/notes", "local work")
         self.git(source.parent, "init", "-q")
         with self.assertRaisesRegex(cleanup.Preserve, "nested Git repository"):
-            self.retire(archive=True)
+            self.retire()
         self.assertEqual(source.read_text(), "local work")
         self.assertEqual(self.executed, [])
 
-    def test_ignored_tree_archives_files_and_directory_symlinks(self):
-        self.ignored(".scratch/", ".scratch/nested/notes.md", "keep this draft")
+    def test_ignored_directory_symlink_not_followed(self):
+        self.ignored(".scratch/", ".scratch/nested/notes.md", "draft")
         link = self.wt / ".scratch/linked-directory"
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "secret").write_text("never traverse")
         link.symlink_to(outside, target_is_directory=True)
-        self.retire(archive=True)
-        backup = next((self.root / "state/worktree-clean/archives").glob("*/files/.scratch"))
-        self.assertEqual((backup / "nested/notes.md").read_text(), "keep this draft")
-        self.assertTrue((backup / "linked-directory").is_symlink())
+        self.retire()
+        self.assertFalse(self.wt.exists())
         self.assertEqual((outside / "secret").read_text(), "never traverse")
-
-    def test_unmarked_target_local_files_are_archived(self):
-        self.ignored("target/", "target/review.md", "valuable review notes")
-        (self.wt / "target/debug").mkdir()
-        (self.wt / "target/debug/object").write_text("unknown build state")
-        self.retire(archive=True)
-        backup = next((self.root / "state/worktree-clean/archives").glob("*/files/target"))
-        self.assertEqual((backup / "review.md").read_text(), "valuable review notes")
-        self.assertEqual((backup / "debug/object").read_text(), "unknown build state")
 
     def test_agent_scratch_is_disposable(self):
         self.ignored(".tmp/", ".tmp/pr-body.md", "draft")
@@ -787,31 +699,12 @@ class CleanupTest(unittest.TestCase):
         self.assertFalse(self.wt.exists())
         self.assertFalse((self.root / "state").exists())
 
-    def test_marked_cargo_target_is_reproducible(self):
-        self.ignored("target/", "target/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n")
-        (self.wt / "target/debug").mkdir()
-        (self.wt / "target/debug/object").write_text("compiled output")
-        self.retire(archive=True)
-        self.assertFalse(self.wt.exists())
-        self.assertFalse((self.root / "state").exists())
-
     def test_bare_repository_inside_ignored_artifacts_preserved(self):
         self.ignored("target/", "target/cache/notes", "local")
         self.git(self.wt, "init", "--bare", "target/cache/history.git")
         with self.assertRaisesRegex(cleanup.Preserve, "nested Git repository"):
-            self.retire(archive=True)
+            self.retire()
         self.assertEqual(self.executed, [])
-
-    def test_archive_mode_still_protects_submodule_local_history(self):
-        module = self.module()
-        self.git(module, "config", "user.name", "Test")
-        self.git(module, "config", "user.email", "test@example.com")
-        old = self.git(module, "rev-parse", "HEAD").decode().strip()
-        self.git(module, "commit", "-qm", "local", "--allow-empty")
-        self.git(module, "branch", "local-work")
-        self.git(module, "checkout", "-q", "--detach", old)
-        with self.assertRaisesRegex(cleanup.Preserve, "local-only"):
-            self.retire(archive=True)
 
 
 class PullRequestEvidenceTest(unittest.TestCase):
@@ -985,7 +878,6 @@ class ShellDispatchTest(unittest.TestCase):
                 )
                 calls = log.read_text().splitlines()
                 self.assertEqual("find" in calls, bool(flags))
-                self.assertIn("--archive-local-data", calls[0])
                 log.write_text("")
 
 
