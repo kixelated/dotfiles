@@ -138,7 +138,8 @@ def use_gateway(home, host, read_key):
 
 
 def ssh_key(host):
-    return subprocess.run(['ssh', host, 'cat .config/cliproxy-proxy/client-key'],
+    # No stdin: ssh would otherwise swallow the rest of a script piped into a shell.
+    return subprocess.run(['ssh', host, 'cat .config/cliproxy-proxy/client-key'], stdin=subprocess.DEVNULL,
                           check=True, capture_output=True, text=True).stdout
 
 
