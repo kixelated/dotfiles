@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Merge the default model and reasoning effort into Claude Code and Codex.
 
-Claude Code: the effort level, the Opus auto-compact window, and the Bash
-tool's timeout cap in each profile's settings.json.
+Claude Code: the effort level, one-hour prompt caches, the Opus auto-compact
+window, and the Bash tool's timeout cap in each profile's settings.json.
 Codex: `model`, `model_reasoning_effort`, and the auto-compact limit in
 $CODEX_HOME/config.toml,
 written by Codex itself so trust hashes and local settings survive.
@@ -21,6 +21,8 @@ import shutil
 # the shell profile, because sessions T3 Code or launchd start never read one.
 CLAUDE = {
     'effortLevel': 'high',
+    'promptCacheTtl': '1h',
+    'subagentPromptCacheTtl': '1h',
     'env': {'BASH_MAX_TIMEOUT_MS': '3300000'},
     'modelSettings': {'claude-opus-5-5': {'autoCompactWindow': 400000}},
 }

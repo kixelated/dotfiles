@@ -7,6 +7,7 @@ every other setting:
 | Agent | Setting | Value |
 | --- | --- | --- |
 | Claude Code | `effortLevel` in `settings.json` of `~/.claude`, `~/.claude-personal`, and `~/.claude-api-credits` | `high` |
+| Claude Code | `promptCacheTtl` and `subagentPromptCacheTtl` in the same files | `1h` |
 | Claude Code | `modelSettings.claude-opus-5-5.autoCompactWindow` in the same files | `400000` |
 | Claude Code | `env.BASH_MAX_TIMEOUT_MS` in the same files | `3300000` |
 | Codex | `model` and `model_reasoning_effort` in `$CODEX_HOME/config.toml` | `gpt-6.1-sol`, `xhigh` |
@@ -14,6 +15,12 @@ every other setting:
 
 Codex writes `config.toml` itself through `codex app-server`, so trust hashes and
 other local keys survive. Without `codex` on `PATH`, the Codex part is skipped.
+
+One-hour caches keep large contexts warm through tool waits and resumed work;
+five-minute caches expired between turns and rewrote the whole prefix. Each
+`CLAUDE_CONFIG_DIR` has its own settings file, so every profile gets the keys.
+`FORCE_PROMPT_CACHING_5M` and the `CLAUDE_CODE_*PROMPT_CACHE_TTL` environment
+variables override them.
 
 The auto-compact window keeps Opus sessions from replaying close to a million
 tokens a turn before compacting. The Bash cap lets a wait block for up to 55
