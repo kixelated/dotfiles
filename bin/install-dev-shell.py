@@ -23,7 +23,7 @@ import subprocess
 import tempfile
 import threading
 
-CLAUDE_PROFILES = ('.claude', '.claude-personal', '.claude-api-credits')
+CLAUDE_PROFILES = ('.claude', '.claude-proxy', '.claude-api-credits')
 BIN = Path(__file__).resolve().parent
 HOOK = BIN / 'dev-shell-hook'
 BASH_ENV = BIN.parent / 'codex' / 'bash-env.sh'

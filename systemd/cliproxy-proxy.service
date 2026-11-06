@@ -1,0 +1,20 @@
+[Unit]
+Description=Claude subscription proxy gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/cliproxy-proxy/cli-proxy-api -config %h/.config/cliproxy-proxy/config.yaml
+WorkingDirectory=%h/.local/share/cliproxy-proxy
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/cliproxy-proxy %h/.local/share/cliproxy-proxy
+
+[Install]
+WantedBy=default.target

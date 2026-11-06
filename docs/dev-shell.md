@@ -10,7 +10,7 @@ own. It is idempotent and preserves every other setting and hook:
 
 | Agent | Hook | How commands get the environment |
 | --- | --- | --- |
-| Claude Code | `SessionStart` in `settings.json` of `~/.claude`, `~/.claude-personal`, and `~/.claude-api-credits` | `$CLAUDE_ENV_FILE` sources a sidecar snapshot |
+| Claude Code | `SessionStart` in `settings.json` of `~/.claude`, `~/.claude-proxy`, and `~/.claude-api-credits` | `$CLAUDE_ENV_FILE` sources a sidecar snapshot |
 | Codex | `SessionStart` in `$CODEX_HOME/hooks.json`, trusted in `config.toml` | `shell_environment_policy.set.BASH_ENV` sources `codex/bash-env.sh`, which loads `<checkout>/.direnv/codex-env.sh` |
 | Grok | `SessionStart` in `$GROK_HOME/hooks/dev-shell.json` | `session.load_envrc` runs `direnv export`, and `shell_environment_policy.set.BASH_ENV` sources `grok/bash-env.sh`, which loads `<checkout>/.direnv/grok-env.sh` |
 

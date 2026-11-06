@@ -1,0 +1,15 @@
+[Unit]
+Description=Prefer proxied Claude subscriptions with the soonest weekly reset
+Requires=cliproxy-proxy.service
+After=cliproxy-proxy.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-proxy-quota.py
+TimeoutStartSec=4min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/cliproxy-proxy

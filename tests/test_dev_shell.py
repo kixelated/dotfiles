@@ -39,7 +39,7 @@ class InstallerTests(unittest.TestCase):
         self.home = Path(directory.name)
 
     def test_claude_merge_is_idempotent_and_preserves_settings(self):
-        path = self.home / '.claude-personal' / 'settings.json'
+        path = self.home / '.claude-proxy' / 'settings.json'
         path.parent.mkdir()
         other = {'hooks': [{'type': 'command', 'command': 'notify'}]}
         path.write_text(json.dumps({'model': 'opus', 'promptCacheTtl': '1h',
