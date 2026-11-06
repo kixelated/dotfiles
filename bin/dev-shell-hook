@@ -138,7 +138,8 @@ def main(argv):
         name = {'codex': 'codex-env.sh', 'grok': 'grok-env.sh'}[mode]
         (root / '.direnv').mkdir(exist_ok=True)
         path = root / '.direnv' / name
-        write_private(path, stamp.encode() + b'\n' + snapshot)
+        # Only the Codex loader checks the stamp; Grok sources its snapshot as is.
+        write_private(path, stamp.encode() + b'\n' + snapshot if mode == 'codex' else snapshot)
         Path(str(path) + '.stale').unlink(missing_ok=True)
     return 0
 
