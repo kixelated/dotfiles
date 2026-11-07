@@ -6,7 +6,7 @@ every other setting:
 
 | Agent | Setting | Value |
 | --- | --- | --- |
-| Claude Code | `effortLevel` in `settings.json` of `~/.claude`, `~/.claude-personal`, and `~/.claude-api-credits` | `high` |
+| Claude Code | `effortLevel` in `settings.json` of `~/.claude`, `~/.claude-proxy`, and `~/.claude-api-credits` | `high` |
 | Claude Code | `promptCacheTtl` and `subagentPromptCacheTtl` in the same files | `1h` |
 | Claude Code | `modelSettings.claude-opus-5-5.autoCompactWindow` in the same files | `400000` |
 | Claude Code | `env.BASH_MAX_TIMEOUT_MS` in the same files | `3300000` |

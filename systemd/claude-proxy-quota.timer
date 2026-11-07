@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh proxied Claude quota priorities every five minutes
+
+[Timer]
+OnActiveSec=1min
+OnUnitInactiveSec=5min
+Unit=claude-proxy-quota.service
+
+[Install]
+WantedBy=timers.target
